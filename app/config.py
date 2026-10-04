@@ -49,6 +49,11 @@ def rule_pattern(rule: dict) -> str:
     return v.strip()
 
 
+def rule_label(rule: dict) -> str:
+    """Étiquette d'une règle : sa valeur (plus de nom séparé, source de confusion)."""
+    return str(rule.get("value") or "").strip() or "Règle"
+
+
 def _upgrade(rule: dict) -> dict:
     """Anciennes règles (motif seul) : on reconnaît le cas « groupe de release »."""
     if rule.get("type") in RULE_TYPES:
@@ -72,7 +77,7 @@ def load_settings() -> dict:
             data = {}
     merged = json.loads(json.dumps(DEFAULT_SETTINGS))
     merged.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
-    merged["rules"] = [_upgrade(r) for r in merged["rules"]]
+    merged["rules"] = [{k: v for k, v in _upgrade(r).items() if k != "name"} for r in merged["rules"]]
     return merged
 
 
@@ -89,7 +94,6 @@ def save_settings(data: dict) -> dict:
             rule["pattern"] = rule_pattern(rule)
             if not rule["pattern"]:
                 continue
-            rule["name"] = str(r.get("name", "")).strip() or rule["value"] or "Règle"
             rules.append(rule)
         clean["rules"] = rules
     if "tracker_aliases" in data:

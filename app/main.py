@@ -117,7 +117,7 @@ async def queue_rules(body: dict | None = None):
     only = (body or {}).get("rule")
     data = await list_releases(refresh=True)
     settings = config.load_settings()
-    order = {r["name"]: n for n, r in enumerate(settings["rules"])}
+    order = {config.rule_label(r): n for n, r in enumerate(settings["rules"])}
     cands = [r for r in data["releases"] if r["rules"] and (not only or only in r["rules"])]
     cands.sort(key=lambda r: (min(order.get(n, 99) for n in r["rules"]), r["count"], r["name"].lower()))
     added = sum(1 for r in cands if queue.add(r, source=r["rules"][0]))

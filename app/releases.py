@@ -2,6 +2,8 @@
 import re
 from urllib.parse import parse_qs, urlparse
 
+from . import config
+
 _cache = {"by_key": {}}
 
 
@@ -38,7 +40,7 @@ def compile_rules(rules: list) -> list:
         if not r.get("enabled", True):
             continue
         try:
-            out.append((r["name"], re.compile(r["pattern"], re.I)))
+            out.append((config.rule_label(r), re.compile(r["pattern"], re.I)))
         except re.error:
             pass
     return out

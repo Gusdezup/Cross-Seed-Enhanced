@@ -178,7 +178,7 @@ function renderReleases() {
     body.innerHTML = shown.map((r) => {
       const meta = [
         ...r.rules.map((n) => `<span class="tag rule">${esc(n)}</span>`),
-        r.mode === "path" ? `<span class="tag path" title="Toutes les copies sont des cross-seeds : la recherche se fera à partir du fichier">recherche par fichier</span>` : "",
+        r.mode === "path" ? `<span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span>` : "",
       ].join("");
       const row = `<tr data-key="${esc(r.key)}">
         <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
@@ -317,7 +317,7 @@ async function loadQueue() {
   const LBL = { pending: "en attente", running: "en cours", done: "terminée", error: "erreur", timeout: "sans réponse" };
   $("#q-body").innerHTML = items.length ? items.map((i) => `<tr>
       <td><span class="st ${i.status}">${LBL[i.status]}</span></td>
-      <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path">recherche par fichier</span></div>` : ""}</td>
+      <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
       <td>${i.source === "manuel" ? "manuel" : `<span class="tag rule">${esc(i.source)}</span>`}</td>
       <td>${resultHtml(i)}</td>
       <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
@@ -332,6 +332,8 @@ $("#q-body").addEventListener("click", async (e) => {
 });
 $("#q-rules").addEventListener("click", async (e) => {
   e.target.disabled = true;
+  // règles modifiées mais pas enregistrées : on enregistre d'abord, sinon le serveur lance les anciennes
+  if (state.settingsDirty && !(await saveSettings())) { e.target.disabled = false; return; }
   try {
     const r = await api("/api/queue/rules", { method: "POST", body: {} });
     toast(r.matched ? `${r.added} release(s) prioritaire(s) ajoutée(s) à la file (${r.matched} correspondent aux règles)` : "Aucune release ne correspond aux règles");
@@ -568,7 +570,6 @@ function renderRules() {
   $("#rules").innerHTML = rules.map((r, i) => `<div class="rule" data-i="${i}">
       <div class="order"><button class="ghost" data-up ${i === 0 ? "disabled" : ""} aria-label="Monter">▲</button>
         <button class="ghost" data-down ${i === rules.length - 1 ? "disabled" : ""} aria-label="Descendre">▼</button></div>
-      <input type="text" data-f="name" value="${esc(r.name)}" placeholder="Nom (facultatif)" aria-label="Nom de la règle">
       <select data-f="type" aria-label="Type de règle">${Object.entries(RULE_TYPES).map(([k, t]) =>
         `<option value="${k}"${(r.type || "regex") === k ? " selected" : ""}>${t.label}</option>`).join("")}</select>
       <input type="text" data-f="value" value="${esc(r.value ?? r.pattern ?? "")}" placeholder="${esc((RULE_TYPES[r.type] || RULE_TYPES.regex).ph)}"
@@ -685,6 +686,7 @@ $("#rules").addEventListener("input", (e) => {
   const f = e.target.dataset.f;
   if (!f) return;
   r[f] = f === "enabled" ? e.target.checked : e.target.value;
+  state.settingsDirty = true;
   if (f === "type") {
     const val = row.querySelector('[data-f="value"]');
     val.placeholder = RULE_TYPES[r.type].ph;
@@ -700,14 +702,16 @@ $("#rules").addEventListener("click", (e) => {
   else if (e.target.closest("[data-up]")) [rules[i - 1], rules[i]] = [rules[i], rules[i - 1]];
   else if (e.target.closest("[data-down]")) [rules[i + 1], rules[i]] = [rules[i], rules[i + 1]];
   else return;
+  state.settingsDirty = true;
   renderRules();
 });
 $("#rule-add").addEventListener("click", () => {
-  state.settings.rules.push({ name: "", type: "group", value: "", enabled: true });
+  state.settings.rules.push({ type: "group", value: "", enabled: true });
+  state.settingsDirty = true;
   renderRules();
   $('#rules .rule:last-child [data-f="value"]').focus();
 });
-$("#set-save").addEventListener("click", async () => {
+async function saveSettings() {
   const aliases = {};
   $$("#aliases input").forEach((i) => { if (i.value.trim()) aliases[i.dataset.host] = i.value.trim(); });
   try {
@@ -715,11 +719,16 @@ $("#set-save").addEventListener("click", async () => {
       method: "PUT",
       body: { delay: +$("#set-delay").value, rules: state.settings.rules, tracker_aliases: aliases },
     });
+    state.settingsDirty = false;
     toast("Réglages enregistrés");
     await loadReleases();
     renderSettings();
-  } catch (err) { toast(err.message, true); }
-});
+    return true;
+  } catch (err) { toast(err.message, true); return false; }
+}
+$("#set-save").addEventListener("click", saveSettings);
+$("#set-delay").addEventListener("input", () => { state.settingsDirty = true; });
+window.addEventListener("beforeunload", (e) => { if (state.settingsDirty) e.preventDefault(); });
 
 // ---------- démarrage ----------
 showTab(location.hash.slice(1) || "releases");
