@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cross-seed enhanced</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">cross-seed <em>enhanced</em></span>
+  </div>
+  <div class="health" id="health">
+    <span class="pill" id="pill-qbit"><i></i>qBittorrent</span>
+    <span class="pill" id="pill-xs"><i></i>cross-seed</span>
+  </div>
+  <div class="jobs">
+    <button class="ghost" data-job="rss" title="Lancer le scan RSS de cross-seed maintenant">RSS</button>
+    <button class="ghost" data-job="search" title="Lancer le scan complet de tous les torrents (searchCadence)">Scan complet</button>
+    <button class="ghost" data-job="inject" title="Retenter maintenant les injections en attente">Injecter</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <a href="#releases" data-tab="releases">Releases <b id="cnt-releases"></b></a>
+    <a href="#queue" data-tab="queue">File de recherche <b id="cnt-queue"></b></a>
+    <a href="#pending" data-tab="pending">Injections en attente <b id="cnt-pending"></b></a>
+    <a href="#indexers" data-tab="indexers">Indexers <b id="cnt-indexers"></b></a>
+    <a href="#logs" data-tab="logs">Logs</a>
+    <a href="#settings" data-tab="settings">Réglages</a>
+  </nav>
+
+  <main>
+    <!-- RELEASES -->
+    <section id="tab-releases" class="tab">
+      <div class="toolbar">
+        <input type="search" id="rel-q" placeholder="Filtrer par nom (ex. HDForever, 1080p, Remux…)" autocomplete="off">
+        <select id="rel-filter" aria-label="Filtre">
+          <option value="all">Toutes les releases</option>
+          <option value="rules">Prioritaires (règles)</option>
+          <option value="single">Une seule copie</option>
+          <option value="noorig">Sans torrent d'origine</option>
+        </select>
+        <select id="rel-tracker" aria-label="Tracker"><option value="">Tous les trackers</option></select>
+        <select id="rel-sort" aria-label="Tri">
+          <option value="count">Moins cross-seedées d'abord</option>
+          <option value="name">Nom</option>
+          <option value="size">Taille</option>
+          <option value="added">Ajout récent</option>
+        </select>
+        <button class="ghost" id="rel-refresh" title="Recharger depuis qBittorrent">Actualiser</button>
+      </div>
+      <div class="selbar" id="rel-selbar" hidden>
+        <span id="rel-selcount"></span>
+        <button class="primary" id="rel-search-sel">Chercher la sélection</button>
+        <button class="ghost" id="rel-clear-sel">Désélectionner</button>
+      </div>
+      <p class="summary" id="rel-summary"></p>
+      <div class="table-wrap">
+        <table class="rel">
+          <thead><tr>
+            <th class="c-check"><input type="checkbox" id="rel-all" aria-label="Tout sélectionner"></th>
+            <th>Release</th><th class="c-size">Taille</th><th>Copies</th><th class="c-act"></th>
+          </tr></thead>
+          <tbody id="rel-body"></tbody>
+        </table>
+      </div>
+      <button class="ghost more" id="rel-more" hidden>Afficher plus</button>
+    </section>
+
+    <!-- FILE -->
+    <section id="tab-queue" class="tab" hidden>
+      <div class="queue-head">
+        <div>
+          <h2>File de recherche</h2>
+          <p class="muted" id="q-state"></p>
+        </div>
+        <div class="btns">
+          <button class="primary" id="q-rules">Lancer les règles prioritaires</button>
+          <button class="ghost" id="q-pause">Pause</button>
+          <button class="ghost" id="q-clear-pending">Vider la file</button>
+          <button class="ghost" id="q-clear-done">Effacer l'historique</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="queue">
+          <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
+          <tbody id="q-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- PENDING -->
+    <section id="tab-pending" class="tab" hidden>
+      <div class="queue-head">
+        <div>
+          <h2>Injections en attente</h2>
+          <p class="muted">Torrents trouvés par cross-seed mais que qBittorrent a refusés. cross-seed les retente toutes les heures ; « Injecter » les retente tout de suite.</p>
+        </div>
+        <div class="btns"><button class="ghost" data-job="inject">Retenter maintenant</button></div>
+      </div>
+      <div id="pending-list"></div>
+    </section>
+
+    <!-- INDEXERS -->
+    <section id="tab-indexers" class="tab" hidden>
+      <div class="queue-head">
+        <div>
+          <h2>Indexers</h2>
+          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js : cross-seed ne le contacte plus du tout après redémarrage, et son historique est conservé.</p>
+        </div>
+        <div class="btns">
+          <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
+          <button class="primary" id="idx-restart" hidden>Redémarrer cross-seed pour appliquer</button>
+        </div>
+      </div>
+      <div id="idx-list"></div>
+    </section>
+
+    <!-- LOGS -->
+    <section id="tab-logs" class="tab" hidden>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Niveau">
+          <button data-kind="info" class="on">Info</button>
+          <button data-kind="verbose">Détaillé</button>
+          <button data-kind="error">Erreurs</button>
+        </div>
+        <label class="check"><input type="checkbox" id="log-success"> Injections réussies seulement</label>
+        <input type="search" id="log-q" placeholder="Filtrer le texte…" autocomplete="off">
+        <label class="check"><input type="checkbox" id="log-follow" checked> Suivre</label>
+        <button class="ghost" id="log-clear">Vider l'affichage</button>
+      </div>
+      <div class="logview" id="logview" aria-live="off"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab" hidden>
+      <h2>Règles prioritaires</h2>
+      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
+      <div id="rules"></div>
+      <button class="ghost" id="rule-add">Ajouter une règle</button>
+
+      <h2>Rythme</h2>
+      <label class="field">Délai entre deux recherches
+        <span><input type="number" id="set-delay" min="5" max="3600"> secondes</span>
+      </label>
+
+      <h2>Noms des trackers</h2>
+      <p class="muted">Nom affiché pour chaque tracker détecté dans qBittorrent. Laisse vide pour garder le nom automatique.</p>
+      <div id="aliases" class="aliases"></div>
+
+      <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>
+
+      <h2>cross-seed</h2>
+      <p class="muted">Réglages de config.js. Seule la valeur de chaque ligne est modifiée (commentaires conservés) et une copie de sauvegarde est faite dans data/backups. cross-seed ne les prend en compte qu'après un redémarrage.</p>
+      <p class="muted">Durées : un nombre suivi d'une unité en anglais, par exemple 30 minutes, 2 hours, 7 days, 2 weeks (abréviations m, h, d, w acceptées ; pas de mois). Les valeurs sont vérifiées avec les mêmes règles que cross-seed 6.13 avant d'être enregistrées.</p>
+      <div class="xsform" id="xs-form"></div>
+      <div class="savebar btns">
+        <button class="primary" id="xs-save">Enregistrer dans config.js</button>
+        <button class="ghost" id="xs-restart">Redémarrer cross-seed</button>
+        <span class="muted" id="xs-note" style="margin:0"></span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

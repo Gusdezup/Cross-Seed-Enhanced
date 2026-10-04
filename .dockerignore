@@ -1,0 +1,7 @@
+.env
+xse.env
+data
+__pycache__
+.git
+.github
+docs

@@ -1,0 +1,36 @@
+services:
+  cross-seed-enhanced:
+    image: ghcr.io/gusdezup/cross-seed-enhanced:latest
+    # Pour construire l'image toi-même à partir des sources, remplace la ligne image par :
+    # build: .
+    container_name: cross-seed-enhanced
+    restart: unless-stopped
+    ports:
+      - "${PORT:-2469}:2469"
+    env_file:
+      - .env
+    environment:
+      DOCKER_URL: http://xse-docker-proxy:2375
+    volumes:
+      # Config cross-seed : lecture seule (logs, cross-seed.db)
+      - ${XS_CONFIG_PATH}:/cs-config:ro
+      # Écriture : config.js (réglages, suspension d'indexers) et injections en attente
+      - ${XS_CONFIG_PATH}/config.js:/cs-config/config.js
+      - ${XS_CONFIG_PATH}/cross-seeds:/cs-config/cross-seeds
+      # Réglages, file de recherche et sauvegardes de config.js
+      - ./data:/data
+    depends_on:
+      - xse-docker-proxy
+
+  # Accès Docker limité au redémarrage de conteneurs (bouton « Redémarrer cross-seed »).
+  # POST=1 est requis pour tout POST ; CONTAINERS=0 refuse tout le reste de /containers.
+  xse-docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: xse-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 0
+      ALLOW_RESTARTS: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro

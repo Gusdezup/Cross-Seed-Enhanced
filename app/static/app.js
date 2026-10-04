@@ -1,0 +1,733 @@
+"use strict";
+
+// ---------- utilitaires ----------
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, opts = {}) {
+  const init = { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } };
+  if (init.body && typeof init.body !== "string") init.body = JSON.stringify(init.body);
+  const r = await fetch(path, init);
+  let data = null;
+  try { data = await r.json(); } catch { /* vide */ }
+  if (!r.ok) throw new Error((data && data.detail) || `Erreur HTTP ${r.status}`);
+  return data;
+}
+
+let toastTimer;
+function toast(msg, bad = false) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.toggle("bad", bad);
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+function fmtSize(b) {
+  if (!b) return "";
+  const u = ["o", "Ko", "Mo", "Go", "To"];
+  let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return `${b.toFixed(i >= 3 ? 1 : 0)} ${u[i]}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDuration(s) {
+  if (s == null) return "";
+  if (s < 60) return `${s} s`;
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+}
+
+// Couleur stable par tracker, calculée depuis son nom
+const colorCache = new Map();
+const lightMode = window.matchMedia("(prefers-color-scheme: light)");
+function trackerColor(name) {
+  const key = `${name}|${lightMode.matches}`;
+  if (!colorCache.has(key)) {
+    let h = 0;
+    for (const ch of String(name).toLowerCase().replace(/\s*\(api\)\s*$/, "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    colorCache.set(key, lightMode.matches ? `hsl(${h % 360} 65% 38%)` : `hsl(${h % 360} 70% 66%)`);
+  }
+  return colorCache.get(key);
+}
+
+// ---------- état ----------
+const state = {
+  releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
+  settings: null, queue: null, tab: "releases",
+};
+
+// ---------- onglets ----------
+function showTab(name) {
+  if (!$(`#tab-${name}`)) name = "releases";
+  state.tab = name;
+  $$(".tab").forEach((t) => (t.hidden = t.id !== `tab-${name}`));
+  $$(".rail a").forEach((a) => a.classList.toggle("on", a.dataset.tab === name));
+  if (name === "queue") loadQueue();
+  if (name === "pending") loadPending();
+  if (name === "indexers") loadIndexers();
+  if (name === "logs") startLogs();
+  if (name === "settings") renderSettings();
+  if (name !== "logs") stopLogs();
+}
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+
+// ---------- santé ----------
+async function loadHealth() {
+  try {
+    const s = await api("/api/status");
+    state.restartAvailable = !!s.restart_available;
+    const q = $("#pill-qbit"), x = $("#pill-xs");
+    q.className = `pill ${s.qbit.ok ? "ok" : "ko"}`;
+    q.lastChild.textContent = s.qbit.ok ? `qBittorrent ${s.qbit.version}` : "qBittorrent injoignable";
+    q.title = s.qbit.error || "";
+    x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
+    x.lastChild.textContent = s.xs.ok ? "cross-seed en ligne" : "cross-seed injoignable";
+    x.title = s.xs.error || "";
+  } catch { /* le serveur lui-même ne répond pas */ }
+}
+
+// ---------- jobs ----------
+const JOB_LABELS = { rss: "Scan RSS", search: "Scan complet", inject: "Injection" };
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-job]");
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const r = await api(`/api/jobs/${b.dataset.job}`, { method: "POST" });
+    if (r.status < 400) toast(`${JOB_LABELS[b.dataset.job]} lancé(e) par cross-seed`);
+    else if (r.status === 409) toast(`${JOB_LABELS[b.dataset.job]} déjà en cours`);
+    else toast(`cross-seed a répondu ${r.status} : ${typeof r.body === "string" ? r.body : JSON.stringify(r.body)}`, true);
+    if (b.dataset.job === "inject") setTimeout(loadPending, 8000);
+  } catch (err) { toast(err.message, true); }
+  b.disabled = false;
+});
+
+// ---------- releases ----------
+async function loadReleases(refresh = false) {
+  $("#rel-summary").textContent = "Chargement depuis qBittorrent…";
+  try {
+    const d = await api(`/api/releases${refresh ? "?refresh=1" : ""}`);
+    state.releases = d.releases;
+    state.trackers = d.trackers;
+    state.torrents = d.torrents;
+    const sel = $("#rel-tracker"), cur = sel.value;
+    const labels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = `<option value="">Tous les trackers</option>` + labels.map((l) => `<option>${esc(l)}</option>`).join("");
+    sel.value = labels.includes(cur) ? cur : "";
+    for (const k of [...state.selected]) if (!state.releases.some((r) => r.key === k)) state.selected.delete(k);
+    $("#cnt-releases").textContent = d.releases.length;
+    renderReleases();
+    if (state.tab === "settings" && state.settings) { renderRules(); renderAliases(); }
+  } catch (err) {
+    $("#rel-summary").textContent = err.message;
+    $("#rel-body").innerHTML = `<tr><td colspan="5" class="empty">${esc(err.message)}. Vérifie QBT_URL et QBT_APIKEY.</td></tr>`;
+  }
+}
+
+function filteredReleases() {
+  const q = $("#rel-q").value.trim().toLowerCase();
+  const f = $("#rel-filter").value, tr = $("#rel-tracker").value, sort = $("#rel-sort").value;
+  const terms = q.split(/\s+/).filter(Boolean);
+  let list = state.releases.filter((r) => {
+    if (f === "rules" && !r.rules.length) return false;
+    if (f === "single" && r.count !== 1) return false;
+    if (f === "noorig" && r.has_original) return false;
+    if (tr && !r.copies.some((c) => c.tracker === tr)) return false;
+    if (terms.length) {
+      const hay = (r.name + " " + r.copies.map((c) => c.tracker).join(" ")).toLowerCase();
+      if (!terms.every((t) => hay.includes(t))) return false;
+    }
+    return true;
+  });
+  const by = {
+    count: (a, b) => a.count - b.count || a.name.localeCompare(b.name),
+    name: (a, b) => a.name.localeCompare(b.name),
+    size: (a, b) => b.size - a.size,
+    added: (a, b) => b.added_on - a.added_on,
+  }[sort];
+  return list.sort(by);
+}
+
+function chipsHtml(r) {
+  return r.copies.map((c) =>
+    `<span class="chip${c.cross_seed ? "" : " orig"}" style="--c:${trackerColor(c.tracker)}" title="${esc(c.tracker)}${c.cross_seed ? " (cross-seed)" : " (torrent d'origine)"}">${esc(c.tracker)}</span>`
+  ).join("");
+}
+
+function renderReleases() {
+  const list = filteredReleases();
+  const shown = list.slice(0, state.limit);
+  const ruleCount = state.releases.filter((r) => r.rules.length).length;
+  $("#rel-summary").textContent =
+    `${list.length} release${list.length > 1 ? "s" : ""} affichée${list.length > 1 ? "s" : ""} sur ${state.releases.length} ` +
+    `(${state.torrents} torrents terminés, ${ruleCount} prioritaires).`;
+  const body = $("#rel-body");
+  if (!shown.length) {
+    body.innerHTML = `<tr><td colspan="5" class="empty">Aucune release ne correspond à ce filtre.</td></tr>`;
+  } else {
+    body.innerHTML = shown.map((r) => {
+      const meta = [
+        ...r.rules.map((n) => `<span class="tag rule">${esc(n)}</span>`),
+        r.mode === "path" ? `<span class="tag path" title="Toutes les copies sont des cross-seeds : la recherche se fera à partir du fichier">recherche par fichier</span>` : "",
+      ].join("");
+      const row = `<tr data-key="${esc(r.key)}">
+        <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
+        <td><div class="rname" title="Afficher le détail">${esc(r.name)}</div>${meta ? `<div class="rmeta">${meta}</div>` : ""}</td>
+        <td class="c-size">${fmtSize(r.size)}</td>
+        <td><div class="copies">${chipsHtml(r)}</div></td>
+        <td class="c-act"><button class="small" data-search>Chercher</button></td>
+      </tr>`;
+      return row + (state.expanded === r.key ? detailRow(r) : "");
+    }).join("");
+    if (state.expanded) loadHistory(state.expanded);
+  }
+  $("#rel-more").hidden = list.length <= state.limit;
+  $("#rel-all").checked = shown.length > 0 && shown.every((r) => state.selected.has(r.key));
+  updateSelbar();
+}
+
+function detailRow(r) {
+  const copies = r.copies.map((c) => `<tr>
+      <td><span class="chip${c.cross_seed ? "" : " orig"}" style="--c:${trackerColor(c.tracker)}">${esc(c.tracker)}</span></td>
+      <td>${c.cross_seed ? "cross-seed" : "origine"}</td>
+      <td>${esc(c.category || "—")}</td>
+      <td class="mono" title="${esc(c.hash)}">${esc(c.hash.slice(0, 10))}…</td>
+    </tr>`).join("");
+  const target = r.mode === "hash" ? `hash ${r.payload.infoHash.slice(0, 10)}…` : r.payload.path;
+  return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="4">
+    <div class="detail-grid">
+      <div><h4>Copies dans qBittorrent</h4><table class="mini">${copies}</table>
+        <h4 style="margin-top:10px">Cible envoyée à cross-seed</h4><div class="mono">${esc(target)}</div></div>
+      <div><h4>Dernières recherches par indexer</h4><div data-history>Chargement…</div></div>
+    </div></td></tr>`;
+}
+
+async function loadHistory(key) {
+  const box = $(`[data-detail="${CSS.escape(key)}"] [data-history]`);
+  if (!box || box.dataset.loaded) return;
+  box.dataset.loaded = "1";
+  try {
+    const h = await api("/api/releases/history", { method: "POST", body: { key } });
+    if (!h.available) { box.textContent = `Indisponible : ${h.error || "base non lisible"}.`; return; }
+    if (!h.rows.length) { box.textContent = "Jamais cherchée par cross-seed."; return; }
+    const seen = new Map();
+    for (const row of h.rows) if (!seen.has(row.indexer)) seen.set(row.indexer, row);
+    box.innerHTML = `<table class="mini">${[...seen.values()].map((x) =>
+      `<tr><td><span class="chip" style="--c:${trackerColor(x.indexer)}">${esc(x.indexer)}</span></td><td>${fmtDate(x.last)}</td></tr>`).join("")}</table>`;
+  } catch (err) { box.textContent = err.message; }
+}
+
+function updateSelbar() {
+  const n = state.selected.size;
+  $("#rel-selbar").hidden = n === 0;
+  $("#rel-selcount").textContent = `${n} release${n > 1 ? "s" : ""} sélectionnée${n > 1 ? "s" : ""}`;
+}
+
+async function enqueue(keys) {
+  try {
+    const r = await api("/api/search", { method: "POST", body: { keys } });
+    if (r.added) toast(r.added === 1 ? "Recherche ajoutée en tête de file" : `${r.added} recherches ajoutées en tête de file`);
+    if (r.skipped) toast(`${r.added} ajoutée(s), ${r.skipped} déjà dans la file`, !r.added);
+    loadQueue();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#rel-body").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr[data-key]");
+  if (!tr) return;
+  const key = tr.dataset.key;
+  if (e.target.matches("input[type=checkbox]")) {
+    e.target.checked ? state.selected.add(key) : state.selected.delete(key);
+    updateSelbar();
+  } else if (e.target.closest("[data-search]")) {
+    enqueue([key]);
+  } else if (e.target.closest(".rname")) {
+    state.expanded = state.expanded === key ? null : key;
+    renderReleases();
+  }
+});
+$("#rel-all").addEventListener("change", (e) => {
+  for (const r of filteredReleases().slice(0, state.limit)) e.target.checked ? state.selected.add(r.key) : state.selected.delete(r.key);
+  renderReleases();
+});
+$("#rel-search-sel").addEventListener("click", () => { enqueue([...state.selected]); state.selected.clear(); renderReleases(); });
+$("#rel-clear-sel").addEventListener("click", () => { state.selected.clear(); renderReleases(); });
+$("#rel-more").addEventListener("click", () => { state.limit += 200; renderReleases(); });
+$("#rel-refresh").addEventListener("click", () => loadReleases(true));
+let qTimer;
+$("#rel-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.limit = 200; renderReleases(); }, 150); });
+["#rel-filter", "#rel-tracker", "#rel-sort"].forEach((s) => $(s).addEventListener("change", () => { state.limit = 200; renderReleases(); }));
+
+// ---------- file de recherche ----------
+const SKIP_WORDS = [
+  [/temporarily disabled indexers/g, "indexers en pause"],
+  [/timestamps/g, "déjà cherchée récemment"],
+  [/searchLimit/g, "limite de recherches"],
+  [/excludeOlder/g, "torrent trop ancien"],
+  [/, and |, | and /g, ", "],
+];
+function explainSkip(s) { return SKIP_WORDS.reduce((acc, [rx, fr]) => acc.replace(rx, fr), s); }
+
+function resultHtml(i) {
+  if (i.status === "pending") return `<span class="res-none">En attente</span>`;
+  if (i.status === "running") return `<span class="res-none">Recherche envoyée, lecture des logs…</span>`;
+  if (i.status === "error" || i.status === "timeout") return `<span class="res-bad">${esc(i.error)}</span>`;
+  const r = i.result || {};
+  if (r.refused) {
+    const why = /cross seed/i.test(r.refused) ? "ce torrent est lui-même un cross-seed" : r.refused;
+    return `<span class="res-bad" title="${esc(r.refused)}">Refusée par cross-seed : ${esc(why)}</span>`;
+  }
+  const parts = [];
+  if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ` +
+    r.injected.map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" "));
+  if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection sur ${esc(r.failed.join(", "))}</span>`);
+  if (!parts.length) {
+    if (r.skipped && !r.found) parts.push(`<span class="res-warn">Sautée : ${esc(explainSkip(r.skipped))}</span>`);
+    else parts.push(`<span class="res-none">${r.found ? `${r.found} trouvé(s), rien de nouveau` : "Rien trouvé"}</span>`);
+  }
+  return parts.join(" ");
+}
+
+async function loadQueue() {
+  try { state.queue = await api("/api/queue"); } catch { return; }
+  const q = state.queue;
+  const cnt = $("#cnt-queue");
+  cnt.textContent = q.pending || "";
+  cnt.classList.toggle("hot", q.pending > 0);
+  if (state.tab !== "queue") return;
+  $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
+  let st;
+  if (q.paused) st = `En pause, ${q.pending} recherche(s) en attente.`;
+  else if (q.pending) st = `${q.pending} en attente. Prochaine recherche dans ${fmtDuration(q.next_in)}, fin estimée dans ${fmtDuration(q.eta_seconds)} (une toutes les ${q.delay} s).`;
+  else st = `File vide. Une recherche est envoyée toutes les ${q.delay} s quand la file se remplit.`;
+  $("#q-state").textContent = st;
+  const order = { running: 0, pending: 1 };
+  const items = [...q.items].sort((a, b) =>
+    (order[a.status] ?? 2) - (order[b.status] ?? 2) || ((order[a.status] ?? 2) === 2 ? b.done - a.done : 0));
+  const LBL = { pending: "en attente", running: "en cours", done: "terminée", error: "erreur", timeout: "sans réponse" };
+  $("#q-body").innerHTML = items.length ? items.map((i) => `<tr>
+      <td><span class="st ${i.status}">${LBL[i.status]}</span></td>
+      <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path">recherche par fichier</span></div>` : ""}</td>
+      <td>${i.source === "manuel" ? "manuel" : `<span class="tag rule">${esc(i.source)}</span>`}</td>
+      <td>${resultHtml(i)}</td>
+      <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">Rien dans la file. Lance les règles prioritaires ou clique « Chercher » sur une release.</td></tr>`;
+}
+
+$("#q-body").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-rm]");
+  if (!b) return;
+  await api(`/api/queue/${b.dataset.rm}`, { method: "DELETE" });
+  loadQueue();
+});
+$("#q-rules").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try {
+    const r = await api("/api/queue/rules", { method: "POST", body: {} });
+    toast(r.matched ? `${r.added} release(s) prioritaire(s) ajoutée(s) à la file (${r.matched} correspondent aux règles)` : "Aucune release ne correspond aux règles");
+    loadQueue();
+  } catch (err) { toast(err.message, true); }
+  e.target.disabled = false;
+});
+$("#q-pause").addEventListener("click", async () => {
+  await api(`/api/queue/${state.queue && state.queue.paused ? "resume" : "pause"}`, { method: "POST" });
+  loadQueue();
+});
+$("#q-clear-pending").addEventListener("click", async () => {
+  if (!confirm("Retirer toutes les recherches en attente ?")) return;
+  const r = await api("/api/queue/clear-pending", { method: "POST" });
+  toast(`${r.removed} recherche(s) retirée(s)`);
+  loadQueue();
+});
+$("#q-clear-done").addEventListener("click", async () => {
+  await api("/api/queue/clear-done", { method: "POST" });
+  loadQueue();
+});
+
+// ---------- injections en attente ----------
+async function loadPending() {
+  let d;
+  try { d = await api("/api/pending"); } catch (err) { $("#pending-list").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+  const cnt = $("#cnt-pending");
+  cnt.textContent = d.items.length || "";
+  cnt.classList.toggle("hot", d.items.length > 0);
+  if (!d.items.length) {
+    $("#pending-list").innerHTML = `<p class="empty">Aucune injection en attente. Tout ce que cross-seed a trouvé est dans qBittorrent.</p>`;
+    return;
+  }
+  $("#pending-list").innerHTML = d.items.map((p) => `<div class="card">
+      <div class="card-head">
+        <div><span class="chip" style="--c:${trackerColor(p.tracker)}">${esc(p.tracker)}</span>
+          <span class="rname">${esc(p.name)}</span></div>
+        <div class="btns"><span class="muted" style="margin:0">${esc(p.type)}, trouvé le ${fmtDate(p.mtime)}</span>
+          ${d.writable ? `<button class="small danger" data-del="${esc(p.file)}">Abandonner</button>` : ""}</div>
+      </div>
+      ${p.errors.length ? `<pre>${esc(p.errors.join("\n"))}</pre>` : ""}
+    </div>`).join("") + (d.writable ? "" : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
+}
+$("#pending-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-del]");
+  if (!b || !confirm(`Abandonner cette injection ?\n\n${b.dataset.del}\n\nSeul le fichier .torrent en attente est supprimé ; tes données ne sont pas touchées.`)) return;
+  try {
+    await api(`/api/pending/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
+    toast("Injection abandonnée");
+    loadPending();
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- indexers ----------
+function parseLogDate(s) { return s ? new Date(s.replace(" ", "T")) : null; }
+let idxData = null;
+async function loadIndexers() {
+  try { idxData = await api("/api/indexers"); } catch (err) { $("#idx-list").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+  renderIndexers();
+}
+function renderIndexers() {
+  const d = idxData, now = new Date(), showRetired = $("#idx-retired").checked;
+  let paused = 0, needRestart = false;
+  const retired = d.items.filter((i) => !i.active && i.config == null).length;
+  $("#idx-retired-lbl").textContent = `Afficher les indexers retirés (${retired})`;
+  const fmt = (x) => x.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const rank = (i) => (i.config === "active" ? 0 : i.config === "suspended" ? 1 : 2);
+  const list = d.items.filter((i) => i.config != null || i.active || showRetired).sort((a, b) => rank(a) - rank(b));
+  const cards = list.map((i) => {
+    const until = [i.retry_after ? new Date(i.retry_after) : null, parseLogDate(i.snooze_log)]
+      .filter((x) => x && x > now).sort((a, b) => b - a)[0];
+    let cls = "", line, pending = "", btn = "";
+    if (i.config === "suspended") {
+      cls = "suspended";
+      line = "Suspendu dans config.js";
+      if (i.active) { pending = "Redémarrage de cross-seed nécessaire"; needRestart = true; }
+      btn = `<button class="small" data-toggle="${esc(i.key)}" data-enable="1">Réactiver</button>`;
+    } else if (i.config === "active" || i.active) {
+      if (until) { cls = "paused"; paused++; line = `En pause jusqu'au ${fmt(until)}${i.status && i.status !== "OK" ? ` (${esc(i.status)})` : ""}`; }
+      else line = i.status ? "Disponible" : "Statut inconnu (base cross-seed non lue)";
+      if (i.config === "active" && !i.active && i.id != null) { pending = "Réactivé : redémarrage de cross-seed nécessaire"; needRestart = true; }
+      if (i.config === "active") btn = `<button class="small ghost" data-toggle="${esc(i.key)}" data-enable="0">Suspendre</button>`;
+    } else {
+      cls = "down"; line = "Retiré : n'est plus dans la config de cross-seed (gardé dans sa base)";
+    }
+    const past = (i.config === "active" || i.active) && !until && i.status && i.status !== "OK"
+      ? ` title="Dernière pause (${esc(i.status)}) terminée${i.retry_after ? ` le ${fmt(new Date(i.retry_after))}` : ""}"` : "";
+    return `<div class="card ${cls}"${past}><div class="name" style="color:${trackerColor(i.name)}">${esc(i.name)}</div>
+      <div class="meta">${line}</div><div class="meta mono">${esc(i.url)}</div>
+      ${pending || btn ? `<div class="card-foot"><span class="pending">${pending}</span>${btn}</div>` : ""}</div>`;
+  });
+  $("#idx-list").innerHTML = (d.error ? `<p class="muted">Base cross-seed : ${esc(d.error)}</p>` : "") +
+    (cards.length ? `<div class="idx">${cards.join("")}</div>` : `<p class="empty">Aucun indexer trouvé.</p>`);
+  $("#idx-restart").hidden = !(needRestart && state.restartAvailable);
+  const cnt = $("#cnt-indexers");
+  cnt.textContent = paused ? `${paused} en pause` : "";
+  cnt.classList.toggle("hot", paused > 0);
+}
+$("#idx-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-toggle]");
+  if (!b) return;
+  const enable = b.dataset.enable === "1";
+  const card = b.closest(".card"), name = card.querySelector(".name").textContent;
+  if (!enable && !confirm(`Suspendre ${name} ?\n\nSa ligne sera mise en commentaire dans config.js (sauvegarde faite avant). cross-seed ne le contactera plus après redémarrage.`)) return;
+  b.disabled = true;
+  try {
+    await api("/api/indexers/toggle", { method: "POST", body: { key: b.dataset.toggle, enable } });
+    toast(`${name} ${enable ? "réactivé" : "suspendu"} dans config.js. Redémarre cross-seed pour appliquer.`);
+    loadIndexers();
+  } catch (err) { toast(err.message, true); b.disabled = false; }
+});
+async function restartXs(btn) {
+  if (!confirm("Redémarrer cross-seed ? Une recherche en cours sera interrompue.")) return false;
+  btn.disabled = true;
+  try {
+    await api("/api/xs-restart", { method: "POST" });
+    toast("cross-seed redémarré");
+    setTimeout(() => { loadHealth(); if (state.tab === "indexers") loadIndexers(); }, 8000);
+    return true;
+  } catch (err) { toast(err.message, true); return false; } finally { btn.disabled = false; }
+}
+$("#idx-restart").addEventListener("click", (e) => restartXs(e.target));
+$("#idx-retired").addEventListener("change", () => idxData && renderIndexers());
+
+// ---------- logs ----------
+const logState = { es: null, kind: "info", entries: [] };
+const SUCCESS_RX = /\bMATCH(_PARTIAL|_SIZE_ONLY)?\b.*- injected/;
+const TRACKER_RX = [
+  / on (.+?) by MATCH/, /Querying (.+?) at http/, /no match for (.+?) torrent /,
+  /Snatched .+ from (.+)$/m, /on temporarily disabled indexers \[(.+?)\]/, /^(.+?) was rate limited/,
+];
+
+function highlight(entry) {
+  const m = entry.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(\w+):\s*(\[[^\]]+\])?\s*([\s\S]*)$/);
+  if (!m) return esc(entry);
+  let msg = esc(m[4]);
+  const names = new Set();
+  for (const rx of TRACKER_RX) { const t = m[4].match(rx); if (t && t[1].length < 40) names.add(t[1]); }
+  for (const n of [...names].sort((a, b) => b.length - a.length)) {
+    msg = msg.split(esc(n)).join(`<span class="trk" style="--c:${trackerColor(n)}">${esc(n)}</span>`);
+  }
+  const lv = m[2].toLowerCase();
+  return `<span class="ts">${m[1].slice(5)}</span> <span class="lv-${lv}">${m[2]}</span> ${m[3] ? `<span class="ctx">${esc(m[3])}</span> ` : ""}${msg}`;
+}
+
+function logLineHtml(e) {
+  const cls = SUCCESS_RX.test(e) ? " hit" : /\berror:|failed to inject/.test(e) ? " err" : "";
+  return `<div class="ll${cls}">${highlight(e)}</div>`;
+}
+
+function logFilter(e) {
+  if ($("#log-success").checked && !SUCCESS_RX.test(e)) return false;
+  const q = $("#log-q").value.trim().toLowerCase();
+  return !q || e.toLowerCase().includes(q);
+}
+
+function renderLogs() {
+  const v = $("#logview");
+  v.innerHTML = logState.entries.filter(logFilter).slice(-2000).map(logLineHtml).join("") ||
+    `<p class="empty">Aucune ligne ne correspond.</p>`;
+  if ($("#log-follow").checked) v.scrollTop = v.scrollHeight;
+}
+
+function startLogs() {
+  stopLogs();
+  logState.entries = [];
+  $("#logview").innerHTML = `<p class="empty">Connexion aux logs…</p>`;
+  const es = new EventSource(`/api/logs/stream?kind=${logState.kind}&lines=600`);
+  logState.es = es;
+  es.addEventListener("init", (ev) => { logState.entries = JSON.parse(ev.data); renderLogs(); });
+  es.addEventListener("lines", (ev) => {
+    const add = JSON.parse(ev.data);
+    logState.entries.push(...add);
+    if (logState.entries.length > 5000) logState.entries.splice(0, logState.entries.length - 5000);
+    const v = $("#logview");
+    if (v.querySelector(".empty")) v.innerHTML = "";
+    v.insertAdjacentHTML("beforeend", add.filter(logFilter).map(logLineHtml).join(""));
+    if ($("#log-follow").checked) v.scrollTop = v.scrollHeight;
+  });
+  es.onerror = () => { if (es.readyState === EventSource.CLOSED) $("#logview").insertAdjacentHTML("beforeend", `<p class="empty">Flux interrompu. Rouvre l'onglet pour reconnecter.</p>`); };
+}
+function stopLogs() { if (logState.es) { logState.es.close(); logState.es = null; } }
+
+$$(".seg [data-kind]").forEach((b) => b.addEventListener("click", () => {
+  $$(".seg [data-kind]").forEach((x) => x.classList.toggle("on", x === b));
+  logState.kind = b.dataset.kind;
+  startLogs();
+}));
+$("#log-success").addEventListener("change", renderLogs);
+let lqTimer;
+$("#log-q").addEventListener("input", () => { clearTimeout(lqTimer); lqTimer = setTimeout(renderLogs, 200); });
+$("#log-clear").addEventListener("click", () => { logState.entries = []; renderLogs(); });
+
+// ---------- réglages ----------
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const ruleWords = (v) => String(v || "").trim().split(/[\s,;]+/).map((w) => w.replace(/^-+/, "")).filter(Boolean);
+function rulePattern(r) {
+  const v = String(r.value || "");
+  if (r.type === "group") { const g = ruleWords(v); return g.length ? `-(?:${g.map(escRe).join("|")})(\\.\\w{2,4})?$` : ""; }
+  if (r.type === "contains") return ruleWords(v).map((w) => `(?=.*${escRe(w)})`).join("");
+  if (r.type === "starts") return v.trim() ? `^${escRe(v.trim())}` : "";
+  return v.trim();
+}
+const RULE_TYPES = {
+  group: { label: "Groupe de release", ph: "ex. HDForever (plusieurs : HDForever, NEO)",
+    hint: "Le nom se termine par -GROUPE, extension .mkv comprise. Plusieurs groupes séparés par une virgule." },
+  contains: { label: "Contient les mots", ph: "ex. 1080p remux",
+    hint: "Tous les mots doivent apparaître dans le nom, dans n'importe quel ordre." },
+  starts: { label: "Commence par", ph: "ex. Star.Wars",
+    hint: "Le nom commence exactement par ce texte (points compris)." },
+  regex: { label: "Expression régulière", ph: "pour les utilisateurs avancés",
+    hint: "Expression régulière Python, insensible à la casse." },
+};
+function ruleMatches(r) {
+  const pat = rulePattern(r);
+  if (!pat) return { n: 0, ex: [], empty: true };
+  let rx;
+  try { rx = new RegExp(pat, "i"); } catch { return null; }
+  const hits = state.releases.filter((rel) => rel.copies.some((c) => rx.test(c.name)));
+  return { n: hits.length, ex: hits.slice(0, 3).map((h) => h.name) };
+}
+function ruleInfoHtml(r) {
+  const m = ruleMatches(r), t = RULE_TYPES[r.type] || RULE_TYPES.regex;
+  let res;
+  if (m === null) res = `<span class="res-bad">Expression invalide</span>`;
+  else if (m.empty) res = `<span class="res-none">Renseigne une valeur</span>`;
+  else if (!m.n) res = `<span class="res-warn">Aucune release ne correspond</span>`;
+  else res = `<span class="res-hit">${m.n} release${m.n > 1 ? "s" : ""}</span>, par exemple : ${m.ex.map((x) => `<span class="mono">${esc(x)}</span>`).join(" ; ")}`;
+  return `${esc(t.hint)}<br>${res}`;
+}
+
+function renderRules() {
+  const rules = state.settings.rules;
+  $("#rules").innerHTML = rules.map((r, i) => `<div class="rule" data-i="${i}">
+      <div class="order"><button class="ghost" data-up ${i === 0 ? "disabled" : ""} aria-label="Monter">▲</button>
+        <button class="ghost" data-down ${i === rules.length - 1 ? "disabled" : ""} aria-label="Descendre">▼</button></div>
+      <input type="text" data-f="name" value="${esc(r.name)}" placeholder="Nom (facultatif)" aria-label="Nom de la règle">
+      <select data-f="type" aria-label="Type de règle">${Object.entries(RULE_TYPES).map(([k, t]) =>
+        `<option value="${k}"${(r.type || "regex") === k ? " selected" : ""}>${t.label}</option>`).join("")}</select>
+      <input type="text" data-f="value" value="${esc(r.value ?? r.pattern ?? "")}" placeholder="${esc((RULE_TYPES[r.type] || RULE_TYPES.regex).ph)}"
+        class="${r.type === "regex" ? "mono" : ""}" aria-label="Valeur">
+      <span class="rule-end"><label class="check"><input type="checkbox" data-f="enabled" ${r.enabled ? "checked" : ""}> active</label>
+        <button class="small danger" data-rm-rule>Supprimer</button></span>
+      <div class="rule-info">${ruleInfoHtml(r)}</div>
+    </div>`).join("") || `<p class="muted">Aucune règle.</p>`;
+}
+
+function renderAliases() {
+  const aliases = state.settings.tracker_aliases || {};
+  const hosts = Object.keys(state.trackers).filter(Boolean).sort();
+  $("#aliases").innerHTML = hosts.length ? hosts.map((h) =>
+    `<code>${esc(h)}</code><input type="text" data-host="${esc(h)}" value="${esc(aliases[h] || "")}" placeholder="${esc(state.trackers[h])}">`).join("")
+    : `<p class="muted">Aucun tracker détecté (charge d'abord l'onglet Releases).</p>`;
+}
+
+async function renderSettings() {
+  if (!state.settings) state.settings = await api("/api/settings");
+  $("#set-delay").value = state.settings.delay;
+  renderRules();
+  renderAliases();
+  renderXsForm();
+}
+
+const XS_HELP = {
+  action: "inject : ajoute les cross-seeds dans qBittorrent ; save : enregistre seulement les .torrent",
+  matchMode: "strict (ancien nom : safe) : fichiers identiques ; flexible (risky) : noms de fichiers différents tolérés ; partial : fichiers manquants tolérés. flexible et partial exigent linkDirs.",
+  linkType: "hardlink, symlink ou reflink",
+  delay: "Secondes entre deux recherches du scan complet. De 30 à 3600.",
+  searchCadence: "Fréquence du scan complet. Minimum : 1 day.",
+  rssCadence: "Fréquence du scan RSS. De 10 minutes à 2 hours.",
+  excludeRecentSearch: "Délai avant de rechercher à nouveau un torrent sur un indexer. Au moins 3 × searchCadence.",
+  excludeOlder: "Le scan complet ignore les torrents vus pour la première fois il y a plus longtemps. Entre 2 et 5 × excludeRecentSearch.",
+  searchLimit: "Nombre maximal de recherches par indexer à chaque scan complet. 0 = illimité.",
+  includeSingleEpisodes: "Cherche aussi les épisodes isolés",
+  seasonFromEpisodes: "Part d'épisodes présents pour reconstituer une saison, de 0.5 à 1. En dessous de 1, exige matchMode partial. Vide = désactivé.",
+  duplicateCategories: "Crée des catégories « .cross-seed » dans qBittorrent",
+  linkCategory: "Catégorie qBittorrent des cross-seeds liés",
+};
+const XS_ENUMS = {
+  action: ["inject", "save"],
+  matchMode: ["strict", "flexible", "partial"],
+  linkType: ["hardlink", "symlink", "reflink"],
+};
+let xsSettings = null;
+async function renderXsForm() {
+  try {
+    const d = await api("/api/indexers");
+    xsSettings = d.settings || {};
+  } catch (err) { $("#xs-form").innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  const st = await api("/api/status").catch(() => ({}));
+  $("#xs-restart").hidden = !st.restart_available;
+  $("#xs-note").textContent = st.restart_available ? "" : "Redémarrage depuis l'interface non configuré : relance cross-seed depuis le NAS.";
+  const keys = Object.keys(xsSettings);
+  $("#xs-form").innerHTML = keys.length ? keys.map((k) => {
+    const s = xsSettings[k];
+    let input;
+    if (s.kind === "boolean") {
+      input = `<select data-xs="${k}"><option${s.value === "true" ? " selected" : ""}>true</option><option${s.value === "false" ? " selected" : ""}>false</option></select>`;
+    } else if (XS_ENUMS[k]) {
+      const opts = XS_ENUMS[k].includes(s.value) ? XS_ENUMS[k] : [s.value, ...XS_ENUMS[k]];
+      input = `<select data-xs="${k}">${opts.map((o) => `<option${o === s.value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    } else {
+      input = `<input type="text" data-xs="${k}" value="${esc(s.value)}" ${s.kind === "other" ? "disabled" : ""} ${s.kind === "empty" ? 'placeholder="non défini"' : ""}>`;
+    }
+    return `<label for="xs-${k}">${esc(k)}</label>${input.replace("data-xs", `id="xs-${k}" data-xs`)}<span class="help" data-help="${k}">${esc(XS_HELP[k] || "")}</span>`;
+  }).join("") : `<p class="muted">config.js illisible.</p>`;
+  if (keys.length) xsCheck();
+}
+function xsChanges() {
+  const changes = {};
+  $$("#xs-form [data-xs]").forEach((el) => { if (!el.disabled && el.value !== xsSettings[el.dataset.xs].value) changes[el.dataset.xs] = el.value; });
+  return changes;
+}
+let xsCheckTimer, xsHasErrors = false;
+async function xsCheck() {
+  let r;
+  try { r = await api("/api/xs-settings/check", { method: "POST", body: xsChanges() }); } catch { return; }
+  xsHasErrors = Object.keys(r.errors).length > 0;
+  $$("#xs-form [data-help]").forEach((h) => {
+    const k = h.dataset.help, msg = r.errors[k] || r.warnings[k];
+    h.classList.toggle("bad", !!r.errors[k]);
+    h.classList.toggle("warn", !r.errors[k] && !!r.warnings[k]);
+    h.textContent = msg || XS_HELP[k] || "";
+  });
+  $("#xs-save").disabled = xsHasErrors;
+  $("#xs-note").textContent = xsHasErrors ? "Corrige les valeurs en rouge : cross-seed refuserait de démarrer." : "";
+}
+$("#xs-form").addEventListener("input", (e) => {
+  const k = e.target.dataset.xs;
+  if (!k) return;
+  e.target.classList.toggle("dirty", e.target.value !== xsSettings[k].value);
+  clearTimeout(xsCheckTimer);
+  xsCheckTimer = setTimeout(xsCheck, 300);
+});
+$("#xs-save").addEventListener("click", async () => {
+  const changes = xsChanges();
+  if (!Object.keys(changes).length) { toast("Aucune modification"); return; }
+  try {
+    const r = await api("/api/xs-settings", { method: "PUT", body: changes });
+    toast(r.changed ? "config.js enregistré. Redémarre cross-seed pour l'appliquer." : "Aucune modification");
+    if (r.changed) $("#xs-note").textContent = `Sauvegarde : ${r.backup}. Redémarrage nécessaire.`;
+    renderXsForm();
+  } catch (err) { toast(err.message, true); }
+});
+$("#xs-restart").addEventListener("click", async (e) => { if (await restartXs(e.target)) $("#xs-note").textContent = ""; });
+
+$("#rules").addEventListener("input", (e) => {
+  const row = e.target.closest(".rule");
+  if (!row) return;
+  const r = state.settings.rules[+row.dataset.i];
+  const f = e.target.dataset.f;
+  if (!f) return;
+  r[f] = f === "enabled" ? e.target.checked : e.target.value;
+  if (f === "type") {
+    const val = row.querySelector('[data-f="value"]');
+    val.placeholder = RULE_TYPES[r.type].ph;
+    val.classList.toggle("mono", r.type === "regex");
+  }
+  if (f === "type" || f === "value") row.querySelector(".rule-info").innerHTML = ruleInfoHtml(r);
+});
+$("#rules").addEventListener("click", (e) => {
+  const row = e.target.closest(".rule");
+  if (!row) return;
+  const i = +row.dataset.i, rules = state.settings.rules;
+  if (e.target.closest("[data-rm-rule]")) rules.splice(i, 1);
+  else if (e.target.closest("[data-up]")) [rules[i - 1], rules[i]] = [rules[i], rules[i - 1]];
+  else if (e.target.closest("[data-down]")) [rules[i + 1], rules[i]] = [rules[i], rules[i + 1]];
+  else return;
+  renderRules();
+});
+$("#rule-add").addEventListener("click", () => {
+  state.settings.rules.push({ name: "", type: "group", value: "", enabled: true });
+  renderRules();
+  $('#rules .rule:last-child [data-f="value"]').focus();
+});
+$("#set-save").addEventListener("click", async () => {
+  const aliases = {};
+  $$("#aliases input").forEach((i) => { if (i.value.trim()) aliases[i.dataset.host] = i.value.trim(); });
+  try {
+    state.settings = await api("/api/settings", {
+      method: "PUT",
+      body: { delay: +$("#set-delay").value, rules: state.settings.rules, tracker_aliases: aliases },
+    });
+    toast("Réglages enregistrés");
+    await loadReleases();
+    renderSettings();
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- démarrage ----------
+showTab(location.hash.slice(1) || "releases");
+loadHealth();
+loadReleases();
+loadQueue();
+loadPending();
+loadIndexers();
+setInterval(loadHealth, 30000);
+setInterval(loadQueue, 3000);
+setInterval(() => { if (state.tab === "pending" || !document.hidden) loadPending(); }, 60000);
