@@ -111,7 +111,7 @@
       <div class="queue-head">
         <div>
           <h2>Indexers</h2>
-          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js : cross-seed ne le contacte plus du tout après redémarrage, et son historique est conservé.</p>
+          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (liste Prowlarr) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
         </div>
         <div class="btns">
           <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
@@ -150,7 +150,7 @@
       </label>
 
       <h2>Noms des trackers</h2>
-      <p class="muted">Nom affiché pour chaque tracker détecté dans qBittorrent. Laisse vide pour garder le nom automatique.</p>
+      <p class="muted">Nom affiché pour chaque tracker détecté dans qBittorrent. Laisse vide pour garder le nom automatique : celui de l'indexer Prowlarr du même site s'il existe, sinon le domaine.</p>
       <div id="aliases" class="aliases"></div>
 
       <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>

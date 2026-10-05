@@ -46,8 +46,14 @@ def compile_rules(rules: list) -> list:
     return out
 
 
-def build(torrents: list, settings: dict) -> list:
+def _domain(host: str) -> str:
+    return host if re.fullmatch(r"[\d.]+", host or "") else ".".join((host or "").split(".")[-2:])
+
+
+def build(torrents: list, settings: dict, site_names: dict | None = None) -> list:
+    """site_names : {domaine: nom} venant de Prowlarr, utilisé quand aucun nom n'est saisi dans les réglages."""
     aliases = settings.get("tracker_aliases", {})
+    site_names = site_names or {}
     rules = compile_rules(settings.get("rules", []))
     groups: dict = {}
     for t in torrents:
@@ -69,7 +75,7 @@ def build(torrents: list, settings: dict) -> list:
                 "hash": t["hash"],
                 "name": t["name"],
                 "host": host,
-                "tracker": aliases.get(host) or default_label(host),
+                "tracker": aliases.get(host) or site_names.get(_domain(host)) or default_label(host),
                 "cross_seed": is_cross_seed(t),
                 "category": t.get("category") or "",
                 "state": t.get("state") or "",

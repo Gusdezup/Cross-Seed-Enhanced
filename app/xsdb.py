@@ -1,4 +1,5 @@
-"""Lecture SEULE de cross-seed.db et de config.js. Rien n'est jamais écrit.
+"""Lecture SEULE de cross-seed.db ; config.js est lu, et modifié seulement sur action explicite
+(indexers, réglages), avec sauvegarde préalable.
 
 Le schéma de la base peut changer entre versions de cross-seed : chaque requête
 vérifie d'abord les tables et colonnes présentes, et l'interface affiche
@@ -215,6 +216,89 @@ def set_indexer(key: str, enable: bool) -> dict:
             lines[target["line"]] = indent + body + "\n" + base + tail
             return _write_config(text, "\n".join(lines))
     lines[target["line"]] = indent + body
+    return _write_config(text, "\n".join(lines))
+
+
+_TPL_RE = re.compile(r"^(?P<prefix>.*)/\d+/api\?apikey=(?P<key>[^&\s'\"`]+)$")
+
+
+def prowlarr_from_config():
+    """(adresse, clé) de Prowlarr déduites de la première ligne Torznab de config.js, ou None.
+    La clé Torznab de Prowlarr est sa clé API."""
+    for e in torznab_entries():
+        m = _TPL_RE.match(e["url"])
+        if m:
+            return m["prefix"], m["key"]
+    return None
+
+
+def torznab_url(prowlarr_id: int) -> str:
+    """URL Torznab d'un indexer Prowlarr, sur le modèle des lignes déjà présentes dans config.js
+    (c'est cross-seed qui la contacte : on garde l'adresse qu'il utilise déjà)."""
+    for e in torznab_entries():
+        m = _TPL_RE.match(e["url"])
+        if m:
+            return f"{m['prefix']}/{prowlarr_id}/api?apikey={m['key']}"
+    if not (config.PROWLARR_URL and config.PROWLARR_APIKEY):
+        raise ValueError("Aucune ligne Torznab existante à imiter et Prowlarr non configuré")
+    return f"{config.PROWLARR_URL}/{prowlarr_id}/api?apikey={config.PROWLARR_APIKEY}"
+
+
+def _indent(line: str) -> str:
+    return line[:len(line) - len(line.lstrip())]
+
+
+def add_indexer(url: str) -> dict:
+    """Ajoute une URL au tableau torznab (ou réactive sa ligne si elle est suspendue)."""
+    key = logs.normalize_url(url)
+    entries = torznab_entries()
+    existing = next((e for e in entries if e["key"] == key), None)
+    if existing:
+        return set_indexer(key, True) if existing["state"] == "suspended" else {"changed": False, "backup": None}
+    text = _config_text()
+    lines = text.split("\n")
+    rng = _torznab_lines(lines)
+    if rng is None:
+        raise ValueError("Tableau torznab introuvable ou au format non reconnu (une URL par ligne attendue)")
+    base = _indent(lines[rng.start - 1])
+    indent = _indent(lines[entries[0]["line"]]) if entries else base + "    "
+    last = rng[-1]                      # ligne qui contient le « ] » final
+    body = lines[last]
+    if _URL_RE.search(body) and not body.lstrip().startswith("//"):
+        # « "url"], » : on coupe avant le « ] », puis nouvelle ligne, puis « ], »
+        m = re.match(r'^(.*?["\'`])\s*(\].*)$', body)
+        if not m:
+            raise ValueError("Fin du tableau torznab au format non reconnu")
+        lines[last:last + 1] = [m.group(1) + ",", f'{indent}"{url}"', base + m.group(2).strip()]
+    else:
+        # « ] » sur sa propre ligne : la dernière entrée active doit finir par une virgule
+        active = [e for e in entries if e["state"] == "active"]
+        if active:
+            n = active[-1]["line"]
+            if not _code_part(lines[n]).rstrip().endswith(","):
+                lines[n] = re.sub(r'(["\'`])(\s*(?://.*)?)$', r"\1,\2", lines[n], count=1)
+        lines.insert(last, f'{indent}"{url}",')
+    return _write_config(text, "\n".join(lines))
+
+
+def remove_indexer(key: str) -> dict:
+    """Supprime la ligne d'un indexer (active ou suspendue) du tableau torznab."""
+    text = _config_text()
+    lines = text.split("\n")
+    entries = torznab_entries()
+    target = next((e for e in entries if e["key"] == key), None)
+    if not target:
+        raise ValueError("Indexer absent de config.js")
+    if target["state"] == "active" and sum(e["state"] == "active" for e in entries) <= 1:
+        raise ValueError("Impossible de retirer le dernier indexer actif")
+    n = target["line"]
+    if target["state"] == "active" and "]" in _code_part(lines[n]):
+        # la ligne ferme aussi le tableau : on ne garde que « ], »
+        m = re.match(r'^.*?["\'`]\s*(\].*)$', lines[n])
+        base = _indent(lines[_torznab_lines(lines).start - 1])
+        lines[n] = base + m.group(1).strip()
+    else:
+        del lines[n]
     return _write_config(text, "\n".join(lines))
 
 

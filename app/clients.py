@@ -59,3 +59,12 @@ async def xs_restart() -> None:
                          params={"t": 10}, timeout=60)
     if r.status_code >= 400:
         raise RuntimeError(f"Docker a répondu {r.status_code} : {r.text[:200]}")
+
+
+async def prowlarr_indexers(url: str, key: str) -> tuple:
+    """Indexers déclarés dans Prowlarr et leur état (échecs en cours)."""
+    h = {"X-Api-Key": key}
+    r = await _http.get(f"{url}/api/v1/indexer", headers=h, timeout=20)
+    r.raise_for_status()
+    s = await _http.get(f"{url}/api/v1/indexerstatus", headers=h, timeout=20)
+    return r.json(), (s.json() if s.status_code < 400 else [])

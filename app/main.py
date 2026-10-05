@@ -1,6 +1,7 @@
 """cross-seed-enhanced — interface web pour piloter cross-seed."""
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
@@ -10,10 +11,10 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, logs, releases, xsdb
+from . import clients, config, logs, prowlarr, releases, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -80,7 +81,7 @@ async def list_releases(refresh: bool = False):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"qBittorrent injoignable : {e}") from e
     settings = config.load_settings()
-    items = releases.build(torrents, settings)
+    items = releases.build(torrents, settings, await prowlarr.site_names())
     trackers = {}
     for r in items:
         for c in r["copies"]:
@@ -200,7 +201,35 @@ async def run_job(name: str):
 async def indexers():
     data = await asyncio.to_thread(xsdb.indexers)
     data["settings"] = await asyncio.to_thread(xsdb.useful_settings)
-    return data
+    return await prowlarr.enrich(data)
+
+
+def _config_error(e: Exception) -> HTTPException:
+    if isinstance(e, PermissionError):
+        return HTTPException(403, "config.js est en lecture seule : vérifie le montage dans docker-compose.yml")
+    return HTTPException(400, str(e))
+
+
+@app.post("/api/indexers/add")
+async def indexer_add(body: dict):
+    """Ajoute un indexer Prowlarr (par son id) au tableau torznab de config.js."""
+    try:
+        pid = int(body.get("prowlarr_id"))
+        indexers, _ = await prowlarr.fetch()
+        if not any(i["id"] == pid and i.get("protocol") == "torrent" for i in indexers):
+            raise ValueError("Indexer torrent introuvable dans Prowlarr")
+        return await asyncio.to_thread(lambda: xsdb.add_indexer(xsdb.torznab_url(pid)))
+    except (TypeError, ValueError, OSError, RuntimeError) as e:
+        raise _config_error(e) from e
+
+
+@app.post("/api/indexers/remove")
+async def indexer_remove(body: dict):
+    """Supprime la ligne d'un indexer du tableau torznab de config.js."""
+    try:
+        return await asyncio.to_thread(xsdb.remove_indexer, str(body.get("key", "")))
+    except (ValueError, OSError) as e:
+        raise _config_error(e) from e
 
 
 @app.post("/api/indexers/toggle")
@@ -293,6 +322,19 @@ async def put_settings(body: dict):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+def _versioned_index() -> str:
+    """index.html avec ?v=<empreinte> sur app.js et style.css : après une mise à jour,
+    le navigateur recharge forcément les nouveaux fichiers au lieu de garder l'ancienne version en cache."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    for name in ("app.js", "style.css"):
+        v = hashlib.sha1((STATIC / name).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
+    return html
+
+
+_INDEX = _versioned_index()
+
+
 @app.get("/")
 async def index():
-    return FileResponse(STATIC / "index.html")
+    return HTMLResponse(_INDEX, headers={"Cache-Control": "no-cache"})

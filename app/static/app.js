@@ -90,9 +90,11 @@ async function loadHealth() {
     q.className = `pill ${s.qbit.ok ? "ok" : "ko"}`;
     q.lastChild.textContent = s.qbit.ok ? `qBittorrent ${s.qbit.version}` : "qBittorrent injoignable";
     q.title = s.qbit.error || "";
-    x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
-    x.lastChild.textContent = s.xs.ok ? "cross-seed en ligne" : "cross-seed injoignable";
-    x.title = s.xs.error || "";
+    if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
+      x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
+      x.lastChild.textContent = s.xs.ok ? "cross-seed en ligne" : "cross-seed injoignable";
+      x.title = s.xs.error || "";
+    }
   } catch { /* le serveur lui-même ne répond pas */ }
 }
 
@@ -406,7 +408,11 @@ function renderIndexers() {
     const until = [i.retry_after ? new Date(i.retry_after) : null, parseLogDate(i.snooze_log)]
       .filter((x) => x && x > now).sort((a, b) => b - a)[0];
     let cls = "", line, pending = "", btn = "";
-    if (i.config === "suspended") {
+    const rm = i.config ? `<button class="small ghost danger" data-remove="${esc(i.key)}">Retirer</button>` : "";
+    if (i.config == null && i.active && i.id != null) {
+      cls = "down"; line = "Retiré de config.js";
+      pending = "Redémarrage de cross-seed nécessaire"; needRestart = true;
+    } else if (i.config === "suspended") {
       cls = "suspended";
       line = "Suspendu dans config.js";
       if (i.active) { pending = "Redémarrage de cross-seed nécessaire"; needRestart = true; }
@@ -415,6 +421,7 @@ function renderIndexers() {
       if (until) { cls = "paused"; paused++; line = `En pause jusqu'au ${fmt(until)}${i.status && i.status !== "OK" ? ` (${esc(i.status)})` : ""}`; }
       else line = i.status ? "Disponible" : "Statut inconnu (base cross-seed non lue)";
       if (i.config === "active" && !i.active && i.id != null) { pending = "Réactivé : redémarrage de cross-seed nécessaire"; needRestart = true; }
+      if (i.config === "active" && i.id == null) { line = "Ajouté dans config.js"; pending = "Redémarrage de cross-seed nécessaire"; needRestart = true; }
       if (i.config === "active") btn = `<button class="small ghost" data-toggle="${esc(i.key)}" data-enable="0">Suspendre</button>`;
     } else {
       cls = "down"; line = "Retiré : n'est plus dans la config de cross-seed (gardé dans sa base)";
@@ -422,17 +429,56 @@ function renderIndexers() {
     const past = (i.config === "active" || i.active) && !until && i.status && i.status !== "OK"
       ? ` title="Dernière pause (${esc(i.status)}) terminée${i.retry_after ? ` le ${fmt(new Date(i.retry_after))}` : ""}"` : "";
     return `<div class="card ${cls}"${past}><div class="name" style="color:${trackerColor(i.name)}">${esc(i.name)}</div>
-      <div class="meta">${line}</div><div class="meta mono">${esc(i.url)}</div>
-      ${pending || btn ? `<div class="card-foot"><span class="pending">${pending}</span>${btn}</div>` : ""}</div>`;
+      <div class="meta">${line}</div>${pxWarnings(i.prowlarr, i.config ? "doublon" : "")}<div class="meta mono">${esc(i.url)}</div>
+      ${pending || btn || rm ? `<div class="card-foot"><span class="pending">${pending}</span><span class="btns">${btn}${rm}</span></div>` : ""}</div>`;
   });
+  const px = d.prowlarr || {};
+  let pxHtml = "";
+  if (!px.configured) pxHtml = `<p class="muted">Aucune ligne Torznab Prowlarr dans config.js : renseigne PROWLARR_URL et PROWLARR_APIKEY dans le .env pour ajouter des indexers depuis Prowlarr.</p>`;
+  else if (px.error) pxHtml = `<p class="muted">${esc(px.error)}</p>`;
+  else if (px.absent.length) pxHtml = `<div class="idx">${px.absent.map((p) => `<div class="card absent">
+      <div class="name" style="color:${trackerColor(p.name)}">${esc(p.name)}</div>
+      <div class="meta">Dans Prowlarr, pas utilisé par cross-seed</div>${pxWarnings(p, "deja")}
+      <div class="card-foot"><span></span><button class="small" data-add="${p.id}">Ajouter</button></div></div>`).join("")}</div>`;
+  else pxHtml = `<p class="muted">Tous tes indexers torrent Prowlarr sont déjà dans cross-seed.</p>`;
   $("#idx-list").innerHTML = (d.error ? `<p class="muted">Base cross-seed : ${esc(d.error)}</p>` : "") +
-    (cards.length ? `<div class="idx">${cards.join("")}</div>` : `<p class="empty">Aucun indexer trouvé.</p>`);
-  $("#idx-restart").hidden = !(needRestart && state.restartAvailable);
+    (cards.length ? `<div class="idx">${cards.join("")}</div>` : `<p class="empty">Aucun indexer trouvé.</p>`) +
+    `<h3>Disponibles dans Prowlarr</h3>${pxHtml}`;
+  // Toujours disponible ; mis en avant seulement quand une modification attend un redémarrage.
+  const rb = $("#idx-restart");
+  rb.hidden = !state.restartAvailable;
+  rb.className = needRestart ? "primary" : "ghost";
+  rb.textContent = needRestart ? "Redémarrer cross-seed pour appliquer" : "Redémarrer cross-seed";
   const cnt = $("#cnt-indexers");
   cnt.textContent = paused ? `${paused} en pause` : "";
   cnt.classList.toggle("hot", paused > 0);
 }
+// Avertissements venant de Prowlarr (désactivé, en échec, même site déclaré deux fois)
+function pxWarnings(p, dupMode) {
+  if (!p) return "";
+  const w = [];
+  if (!p.enabled) w.push("Désactivé dans Prowlarr");
+  if (p.failing_until && new Date(p.failing_until) > new Date())
+    w.push(`En échec dans Prowlarr jusqu'au ${new Date(p.failing_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`);
+  if (p.same_site && p.same_site.length)
+    w.push(dupMode === "deja" ? `Même site que ${p.same_site.join(", ")}, déjà utilisé par cross-seed`
+                              : `Même site que ${p.same_site.join(", ")} : doublon, un seul suffit`);
+  return w.map((x) => `<div class="meta warn">${esc(x)}</div>`).join("");
+}
 $("#idx-list").addEventListener("click", async (e) => {
+  const add = e.target.closest("[data-add]"), rem = e.target.closest("[data-remove]");
+  if (add || rem) {
+    const btn = add || rem, name = btn.closest(".card").querySelector(".name").textContent;
+    if (rem && !confirm(`Retirer ${name} de cross-seed ?\n\nSa ligne sera supprimée de config.js (sauvegarde faite avant). Tu pourras le rajouter depuis la liste Prowlarr.`)) return;
+    btn.disabled = true;
+    try {
+      if (add) await api("/api/indexers/add", { method: "POST", body: { prowlarr_id: +add.dataset.add } });
+      else await api("/api/indexers/remove", { method: "POST", body: { key: rem.dataset.remove } });
+      toast(`${name} ${add ? "ajouté à" : "retiré de"} config.js. Redémarre cross-seed pour appliquer.`);
+      loadIndexers();
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+    return;
+  }
   const b = e.target.closest("[data-toggle]");
   if (!b) return;
   const enable = b.dataset.enable === "1";
@@ -448,12 +494,30 @@ $("#idx-list").addEventListener("click", async (e) => {
 async function restartXs(btn) {
   if (!confirm("Redémarrer cross-seed ? Une recherche en cours sera interrompue.")) return false;
   btn.disabled = true;
+  const x = $("#pill-xs");
+  const setPill = (cls, text, title = "") => { x.className = `pill ${cls}`; x.lastChild.textContent = text; x.title = title; };
+  // Affichage immédiat dans la barre du haut ; loadHealth n'y touche plus jusqu'à la fin.
+  state.xsRestarting = true;
+  setPill("busy", "cross-seed redémarre…", "Le démarrage peut prendre quelques minutes s'il indexe des dataDirs");
+  let ok = false;
   try {
     await api("/api/xs-restart", { method: "POST" });
-    toast("cross-seed redémarré");
-    setTimeout(() => { loadHealth(); if (state.tab === "indexers") loadIndexers(); }, 8000);
-    return true;
-  } catch (err) { toast(err.message, true); return false; } finally { btn.disabled = false; }
+    // On attend qu'il réponde à nouveau plutôt qu'un délai fixe : le démarrage peut être long.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 300000) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const s = await api("/api/status").catch(() => null);
+      if (s && s.xs.ok) { ok = true; break; }
+    }
+    if (!ok) toast("cross-seed ne répond toujours pas après 5 min : regarde ses logs", true);
+    return ok;
+  } catch (err) { toast(err.message, true); return false; }
+  finally {
+    state.xsRestarting = false;
+    btn.disabled = false;
+    await loadHealth();
+    if (ok && state.tab === "indexers") loadIndexers();
+  }
 }
 $("#idx-restart").addEventListener("click", (e) => restartXs(e.target));
 $("#idx-retired").addEventListener("change", () => idxData && renderIndexers());

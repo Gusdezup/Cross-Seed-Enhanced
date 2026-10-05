@@ -14,7 +14,7 @@ L'outil ne remplace pas cross-seed. Il utilise son API, lit ses logs et sa base 
 - **Releases** : tes torrents qBittorrent regroupés par release. Les copies cross-seedées et les hardlinks renommés sont fusionnés, avec une puce colorée par tracker (pleine pour le torrent d'origine, en contour pour un cross-seed). Un bouton « Chercher » par release, ou par lot. Le détail affiche la dernière recherche sur chaque indexer.
 - **File de recherche** : une recherche cross-seed toutes les N secondes, les recherches manuelles passant devant. Les règles prioritaires (groupe de release, mots contenus, début du nom) remplissent la file en commençant par les releases les moins cross-seedées. Le résultat de chaque recherche est lu dans les logs : injectée sur tel tracker, rien trouvé, sautée et pourquoi. La file survit aux redémarrages.
 - **Injections en attente** : les torrents trouvés mais refusés par qBittorrent, avec l'erreur correspondante, un bouton pour retenter tout de suite et un pour abandonner.
-- **Indexers** : état de chaque indexer, pause en cours, et un interrupteur Suspendre/Réactiver qui commente la ligne correspondante dans `config.js`.
+- **Indexers** : état de chaque indexer, pause en cours, et un interrupteur Suspendre/Réactiver qui commente la ligne correspondante dans `config.js`. Avec Prowlarr, ajout et retrait d'indexers sans éditer `config.js`, avec avertissement si un indexer est désactivé ou en échec dans Prowlarr, ou si le même site est déclaré deux fois.
 - **Logs** : en direct, avec une couleur par tracker, un filtre texte et un filtre « injections réussies ».
 - **Réglages** : règles prioritaires, rythme de la file, noms des trackers, et les principaux réglages de cross-seed (`searchLimit`, `excludeRecentSearch`, cadences…). Ces derniers sont vérifiés avec les mêmes règles que cross-seed 6.13 avant écriture, et un bouton permet de redémarrer cross-seed.
 
@@ -36,6 +36,8 @@ docker compose up -d
 ```
 
 Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, ainsi que `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
+
+**Prowlarr** : rien à configurer si tes lignes `torznab` pointent vers Prowlarr (`http://…:9696/<id>/api?apikey=…`). L'adresse et la clé en sont déduites. Renseigne `PROWLARR_URL` et `PROWLARR_APIKEY` seulement si cette adresse n'est pas joignable depuis le conteneur de l'interface (par exemple `http://prowlarr:9696` sur un réseau Docker auquel il n'appartient pas).
 
 Le compose utilise l'image publiée sur `ghcr.io`. Pour construire depuis les sources, remplace la ligne `image:` par `build: .`.
 

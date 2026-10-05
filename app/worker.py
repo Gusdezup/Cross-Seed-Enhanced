@@ -4,6 +4,8 @@ import itertools
 import json
 import time
 
+import httpx
+
 from . import clients, config, logs
 
 _ids = itertools.count(1)
@@ -124,6 +126,12 @@ class SearchQueue:
         offset, ident = logs.position("info")
         try:
             await clients.xs_webhook(item["payload"])
+        except httpx.TransportError:
+            # cross-seed injoignable (redémarrage en cours…) : la recherche reste en attente
+            item.update(status="pending", sent=None)
+            self.last_sent = time.time()
+            self.save()
+            return
         except Exception as e:  # noqa: BLE001
             item.update(status="error", error=str(e), done=time.time())
             self.last_sent = time.time()

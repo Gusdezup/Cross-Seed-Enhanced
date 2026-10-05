@@ -51,6 +51,9 @@ button, input, select { font: inherit; color: inherit; }
 .pill.ok i { background: var(--ok); }
 .pill.ko { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
 .pill.ko i { background: var(--danger); }
+.pill.busy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.pill.busy i { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
 .jobs { display: flex; gap: 6px; }
 
 /* --- boutons --- */
@@ -162,6 +165,9 @@ tr.detail td { background: var(--raised); }
 .idx .card.suspended .name { opacity: .6; }
 .idx .card-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
 .idx .pending { color: var(--accent); font-size: 12.5px; }
+.idx .card.absent { border-left-color: var(--line); border-style: dashed; border-left-style: solid; }
+.idx .meta.warn { color: var(--accent); }
+.idx .card-foot .btns { display: flex; gap: 6px; }
 .idx .name { font-weight: 600; }
 .idx .meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
