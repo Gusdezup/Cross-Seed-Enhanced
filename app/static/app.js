@@ -429,7 +429,7 @@ function renderIndexers() {
     const past = (i.config === "active" || i.active) && !until && i.status && i.status !== "OK"
       ? ` title="Dernière pause (${esc(i.status)}) terminée${i.retry_after ? ` le ${fmt(new Date(i.retry_after))}` : ""}"` : "";
     return `<div class="card ${cls}"${past}><div class="name" style="color:${trackerColor(i.name)}">${esc(i.name)}</div>
-      <div class="meta">${line}</div>${pxWarnings(i.prowlarr, i.config ? "doublon" : "")}<div class="meta mono">${esc(i.url)}</div>
+      <div class="meta">${line}</div>${pxWarnings(i.prowlarr || i.jackett, i.config ? "doublon" : "")}<div class="meta mono">${esc(i.url)}</div>
       ${pending || btn || rm ? `<div class="card-foot"><span class="pending">${pending}</span><span class="btns">${btn}${rm}</span></div>` : ""}</div>`;
   });
   const px = d.prowlarr || {};
@@ -441,9 +441,18 @@ function renderIndexers() {
       <div class="meta">Dans Prowlarr, pas utilisé par cross-seed</div>${pxWarnings(p, "deja")}
       <div class="card-foot"><span></span><button class="small" data-add="${p.id}">Ajouter</button></div></div>`).join("")}</div>`;
   else pxHtml = `<p class="muted">Tous tes indexers torrent Prowlarr sont déjà dans cross-seed.</p>`;
+  // Jackett : section affichée seulement s'il est configuré (facultatif, en plus ou à la place de Prowlarr)
+  const jk = d.jackett || {};
+  let jkHtml = "";
+  if (jk.error) jkHtml = `<p class="muted">${esc(jk.error)}</p>`;
+  else if (jk.configured && jk.absent.length) jkHtml = `<div class="idx">${jk.absent.map((p) => `<div class="card absent">
+      <div class="name" style="color:${trackerColor(p.name)}">${esc(p.name)}</div>
+      <div class="meta">Dans Jackett, pas utilisé par cross-seed</div>${pxWarnings(p, "deja")}
+      <div class="card-foot"><span></span><button class="small" data-add-jackett="${esc(p.id)}">Ajouter</button></div></div>`).join("")}</div>`;
+  else if (jk.configured) jkHtml = `<p class="muted">Tous tes indexers Jackett sont déjà dans cross-seed.</p>`;
   $("#idx-list").innerHTML = (d.error ? `<p class="muted">Base cross-seed : ${esc(d.error)}</p>` : "") +
     (cards.length ? `<div class="idx">${cards.join("")}</div>` : `<p class="empty">Aucun indexer trouvé.</p>`) +
-    `<h3>Disponibles dans Prowlarr</h3>${pxHtml}`;
+    `<h3>Disponibles dans Prowlarr</h3>${pxHtml}` + (jkHtml ? `<h3>Disponibles dans Jackett</h3>${jkHtml}` : "");
   // Toujours disponible ; mis en avant seulement quand une modification attend un redémarrage.
   const rb = $("#idx-restart");
   rb.hidden = !state.restartAvailable;
@@ -453,26 +462,28 @@ function renderIndexers() {
   cnt.textContent = paused ? `${paused} en pause` : "";
   cnt.classList.toggle("hot", paused > 0);
 }
-// Avertissements venant de Prowlarr (désactivé, en échec, même site déclaré deux fois)
+// Avertissements venant de Prowlarr ou Jackett (désactivé, en échec, même site déclaré deux fois)
 function pxWarnings(p, dupMode) {
   if (!p) return "";
   const w = [];
-  if (!p.enabled) w.push("Désactivé dans Prowlarr");
+  const src = p.source || "Prowlarr";
+  if (!p.enabled) w.push(`Désactivé dans ${src}`);
   if (p.failing_until && new Date(p.failing_until) > new Date())
-    w.push(`En échec dans Prowlarr jusqu'au ${new Date(p.failing_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`);
+    w.push(`En échec dans ${src} jusqu'au ${new Date(p.failing_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`);
   if (p.same_site && p.same_site.length)
     w.push(dupMode === "deja" ? `Même site que ${p.same_site.join(", ")}, déjà utilisé par cross-seed`
                               : `Même site que ${p.same_site.join(", ")} : doublon, un seul suffit`);
   return w.map((x) => `<div class="meta warn">${esc(x)}</div>`).join("");
 }
 $("#idx-list").addEventListener("click", async (e) => {
-  const add = e.target.closest("[data-add]"), rem = e.target.closest("[data-remove]");
+  const add = e.target.closest("[data-add], [data-add-jackett]"), rem = e.target.closest("[data-remove]");
   if (add || rem) {
     const btn = add || rem, name = btn.closest(".card").querySelector(".name").textContent;
-    if (rem && !confirm(`Retirer ${name} de cross-seed ?\n\nSa ligne sera supprimée de config.js (sauvegarde faite avant). Tu pourras le rajouter depuis la liste Prowlarr.`)) return;
+    if (rem && !confirm(`Retirer ${name} de cross-seed ?\n\nSa ligne sera supprimée de config.js (sauvegarde faite avant). Tu pourras le rajouter depuis la liste Prowlarr ou Jackett.`)) return;
     btn.disabled = true;
     try {
-      if (add) await api("/api/indexers/add", { method: "POST", body: { prowlarr_id: +add.dataset.add } });
+      if (add) await api("/api/indexers/add", { method: "POST", body: add.dataset.addJackett
+        ? { jackett_id: add.dataset.addJackett } : { prowlarr_id: +add.dataset.add } });
       else await api("/api/indexers/remove", { method: "POST", body: { key: rem.dataset.remove } });
       toast(`${name} ${add ? "ajouté à" : "retiré de"} config.js. Redémarre cross-seed pour appliquer.`);
       loadIndexers();

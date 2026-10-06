@@ -39,6 +39,8 @@ Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, a
 
 **Prowlarr** : rien à configurer si tes lignes `torznab` pointent vers Prowlarr (`http://…:9696/<id>/api?apikey=…`). L'adresse et la clé en sont déduites. Renseigne `PROWLARR_URL` et `PROWLARR_APIKEY` seulement si cette adresse n'est pas joignable depuis le conteneur de l'interface (par exemple `http://prowlarr:9696` sur un réseau Docker auquel il n'appartient pas).
 
+**Jackett** : même principe, en plus ou à la place de Prowlarr. L'adresse et la clé sont déduites des lignes `torznab` qui pointent vers Jackett (`http://…:9117/api/v2.0/indexers/<id>/results/torznab/api?apikey=…`) ; sinon, renseigne `JACKETT_URL` et `JACKETT_APIKEY`. Seule la clé API est nécessaire, même si Jackett a un mot de passe admin. Un tracker déclaré à la fois dans Prowlarr et dans Jackett est signalé comme doublon.
+
 Le compose utilise l'image publiée sur `ghcr.io`. Pour construire depuis les sources, remplace la ligne `image:` par `build: .`.
 
 Sur Synology, crée le dossier `data` avant le premier lancement (`mkdir -p data`) : Docker n'y crée pas les dossiers montés manquants.

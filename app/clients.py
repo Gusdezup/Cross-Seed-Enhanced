@@ -71,3 +71,11 @@ async def prowlarr_indexers(url: str, key: str) -> tuple:
     r.raise_for_status()
     s = await _http.get(f"{url}/api/v1/indexerstatus", headers=h, timeout=20)
     return r.json(), (s.json() if s.status_code < 400 else [])
+
+
+async def jackett_indexers(url: str, key: str) -> str:
+    """Indexers configurés dans Jackett (XML Torznab t=indexers de l'agrégat « all »)."""
+    r = await _http.get(f"{url}/api/v2.0/indexers/all/results/torznab/api",
+                        params={"t": "indexers", "configured": "true", "apikey": key}, timeout=20)
+    r.raise_for_status()
+    return r.text

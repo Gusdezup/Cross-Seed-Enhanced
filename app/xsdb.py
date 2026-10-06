@@ -44,7 +44,10 @@ def _ts(v):
 
 def fallback_name(url: str) -> str:
     m = re.search(r":9696/(\d+)", url or "")
-    return f"Prowlarr n°{m.group(1)}" if m else logs.normalize_url(url)
+    if m:
+        return f"Prowlarr n°{m.group(1)}"
+    m = _JK_RE.match(url or "")
+    return f"Jackett {m['id']}" if m else logs.normalize_url(url)
 
 
 def mask(url: str) -> str:
@@ -242,6 +245,29 @@ def torznab_url(prowlarr_id: int) -> str:
     if not (config.PROWLARR_URL and config.PROWLARR_APIKEY):
         raise ValueError("Aucune ligne Torznab existante à imiter et Prowlarr non configuré")
     return f"{config.PROWLARR_URL}/{prowlarr_id}/api?apikey={config.PROWLARR_APIKEY}"
+
+
+_JK_RE = re.compile(r"^(?P<prefix>.*)/api/v2\.0/indexers/(?P<id>[^/]+)/results/torznab/api\?apikey=(?P<key>[^&\s'\"`]+)$")
+
+
+def jackett_from_config():
+    """(adresse, clé) de Jackett déduites de la première ligne Torznab Jackett de config.js, ou None."""
+    for e in torznab_entries():
+        m = _JK_RE.match(e["url"])
+        if m:
+            return m["prefix"], m["key"]
+    return None
+
+
+def jackett_torznab_url(jackett_id: str) -> str:
+    """URL Torznab d'un indexer Jackett, sur le modèle des lignes Jackett déjà présentes dans config.js."""
+    for e in torznab_entries():
+        m = _JK_RE.match(e["url"])
+        if m:
+            return f"{m['prefix']}/api/v2.0/indexers/{jackett_id}/results/torznab/api?apikey={m['key']}"
+    if not (config.JACKETT_URL and config.JACKETT_APIKEY):
+        raise ValueError("Aucune ligne Torznab Jackett à imiter et Jackett non configuré")
+    return f"{config.JACKETT_URL}/api/v2.0/indexers/{jackett_id}/results/torznab/api?apikey={config.JACKETT_APIKEY}"
 
 
 def _indent(line: str) -> str:

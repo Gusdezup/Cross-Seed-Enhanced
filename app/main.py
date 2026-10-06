@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, logs, prowlarr, releases, xsdb
+from . import clients, config, jackett, logs, prowlarr, releases, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -82,7 +82,7 @@ async def list_releases(refresh: bool = False):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"qBittorrent injoignable : {e}") from e
     settings = config.load_settings()
-    items = releases.build(torrents, settings, await prowlarr.site_names())
+    items = releases.build(torrents, settings, {**await jackett.site_names(), **await prowlarr.site_names()})
     trackers = {}
     for r in items:
         for c in r["copies"]:
@@ -203,7 +203,9 @@ async def run_job(name: str):
 async def indexers():
     data = await asyncio.to_thread(xsdb.indexers)
     data["settings"] = await asyncio.to_thread(xsdb.useful_settings)
-    return await prowlarr.enrich(data)
+    await prowlarr.enrich(data)
+    await jackett.enrich(data)
+    return jackett.link_sites(data)
 
 
 def _config_error(e: Exception) -> HTTPException:
@@ -214,8 +216,13 @@ def _config_error(e: Exception) -> HTTPException:
 
 @app.post("/api/indexers/add")
 async def indexer_add(body: dict):
-    """Ajoute un indexer Prowlarr (par son id) au tableau torznab de config.js."""
+    """Ajoute un indexer Prowlarr (prowlarr_id) ou Jackett (jackett_id) au tableau torznab de config.js."""
     try:
+        if body.get("jackett_id"):
+            jid = str(body["jackett_id"])
+            if not any(i["id"] == jid for i in await jackett.fetch()):
+                raise ValueError("Indexer introuvable dans Jackett")
+            return await asyncio.to_thread(lambda: xsdb.add_indexer(xsdb.jackett_torznab_url(jid)))
         pid = int(body.get("prowlarr_id"))
         indexers, _ = await prowlarr.fetch()
         if not any(i["id"] == pid and i.get("protocol") == "torrent" for i in indexers):
