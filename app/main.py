@@ -64,6 +64,7 @@ async def status():
         out["xs"]["error"] = str(e)[:200]
     out["restart_available"] = bool(config.DOCKER_URL) and not config.READONLY
     out["readonly"] = config.READONLY
+    out["config_write"] = not config.READONLY or config.ALLOW_CONFIG_WRITE
     out["files"] = {
         "config": config.XS_CONFIG_JS.exists(),
         "logs": config.LOGS_DIR.is_dir(),

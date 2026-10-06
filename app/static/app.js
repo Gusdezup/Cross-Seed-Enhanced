@@ -86,6 +86,15 @@ async function loadHealth() {
   try {
     const s = await api("/api/status");
     state.restartAvailable = !!s.restart_available;
+    // Lecture seule (instance de dev) : bandeau + boutons neutralisés par CSS (body.ro, body.ro-cfg)
+    state.readonly = !!s.readonly;
+    const cfgWrite = s.config_write !== false;
+    document.body.classList.toggle("ro", state.readonly);
+    document.body.classList.toggle("ro-cfg", !cfgWrite);
+    const rb = $("#ro-banner");
+    rb.hidden = !state.readonly;
+    if (state.readonly) rb.textContent = "Lecture seule (XSE_READONLY) : aucune action sur cross-seed (jobs, recherches, redémarrage), la file de recherche ne part pas. "
+      + (cfgWrite ? "Modifications de config.js autorisées (XSE_ALLOW_CONFIG_WRITE)." : "config.js n'est pas modifiable.");
     const q = $("#pill-qbit"), x = $("#pill-xs");
     q.className = `pill ${s.qbit.ok ? "ok" : "ko"}`;
     q.lastChild.textContent = s.qbit.ok ? `qBittorrent ${s.qbit.version}` : "qBittorrent injoignable";
@@ -309,7 +318,8 @@ async function loadQueue() {
   if (state.tab !== "queue") return;
   $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
   let st;
-  if (q.paused) st = `En pause, ${q.pending} recherche(s) en attente.`;
+  if (state.readonly) st = `Lecture seule : la file ne part pas, ${q.pending} recherche(s) en attente.`;
+  else if (q.paused) st = `En pause, ${q.pending} recherche(s) en attente.`;
   else if (q.pending) st = `${q.pending} en attente. Prochaine recherche dans ${fmtDuration(q.next_in)}, fin estimée dans ${fmtDuration(q.eta_seconds)} (une toutes les ${q.delay} s).`;
   else st = `File vide. Une recherche est envoyée toutes les ${q.delay} s quand la file se remplit.`;
   $("#q-state").textContent = st;
@@ -377,7 +387,9 @@ async function loadPending() {
           ${d.writable ? `<button class="small danger" data-del="${esc(p.file)}">Abandonner</button>` : ""}</div>
       </div>
       ${p.errors.length ? `<pre>${esc(p.errors.join("\n"))}</pre>` : ""}
-    </div>`).join("") + (d.writable ? "" : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
+    </div>`).join("") + (d.writable ? "" : state.readonly
+      ? `<p class="muted">Lecture seule (XSE_READONLY) : suppression désactivée.</p>`
+      : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
 }
 $("#pending-list").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-del]");

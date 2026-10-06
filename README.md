@@ -43,6 +43,13 @@ Le compose utilise l'image publiée sur `ghcr.io`. Pour construire depuis les so
 
 Sur Synology, crée le dossier `data` avant le premier lancement (`mkdir -p data`) : Docker n'y crée pas les dossiers montés manquants.
 
+## Instance de développement
+
+Pour faire tourner une seconde instance (par exemple construite depuis les sources) à côté de la production, sans effet sur cross-seed :
+
+- `XSE_READONLY=true` : aucune action sur cross-seed (jobs, recherches, redémarrage), file de recherche en pause, suppression des fichiers en attente et écriture de `config.js` désactivées. Un bandeau le signale dans l'interface ; une action refusée renvoie une erreur 403.
+- `XSE_ALLOW_CONFIG_WRITE=true` (avec la précédente) : autorise quand même l'écriture de `config.js`, pour tester l'ajout d'indexers ou les réglages. À réserver au cas où l'instance monte une **copie** de `config.js`, jamais celui de la production.
+
 ## Sécurité
 
 - Sans `UI_PASSWORD`, l'interface n'a pas d'authentification. Ne l'expose pas sur Internet ; derrière un reverse proxy, renseigne `UI_PASSWORD`.

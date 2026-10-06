@@ -67,6 +67,13 @@ button.small { padding: 3px 9px; font-size: 12.5px; }
 button.danger { color: var(--danger); background: transparent; }
 
 /* --- structure --- */
+.ro-banner { margin: -4px 0 16px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); font-size: 13px; }
+/* Lecture seule : actions sur cross-seed, et écriture de config.js si elle n'est pas autorisée */
+body.ro [data-job], body.ro #q-pause,
+body.ro-cfg #idx-list [data-toggle], body.ro-cfg #idx-list [data-remove],
+body.ro-cfg #idx-list [data-add], body.ro-cfg #idx-list [data-add-jackett], body.ro-cfg #xs-save {
+  opacity: .4; pointer-events: none;
+}
 .shell { display: grid; grid-template-columns: 210px 1fr; min-height: calc(100vh - 53px); }
 .rail { border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
 .rail a {
