@@ -86,7 +86,7 @@ section h2:not(:first-child) { margin-top: 28px; }
 /* --- barres d'outils --- */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .toolbar input[type=search] { flex: 1 1 280px; }
-input[type=search], input[type=text], input[type=number], select {
+input[type=search], input[type=text], input[type=password], input[type=number], select {
   background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
 }
 .check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
@@ -221,6 +221,10 @@ tr.detail td { background: var(--raised); }
 .sources .src-test { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
 .sources .ok-msg { color: var(--ok); }
 .sources .ko-msg { color: var(--danger); }
+.sources .src-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sources .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.sources .badge.ok { color: var(--ok); border-color: var(--ok); }
+.sources .badge.ko { color: var(--danger); border-color: var(--danger); }
 .savebar { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
 
 /* --- toast --- */

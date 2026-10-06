@@ -680,22 +680,37 @@ const SRC_META = {
   prowlarr: { label: "Prowlarr", ph: "http://prowlarr:9696" },
   jackett: { label: "Jackett", ph: "http://jackett:9117" },
 };
+const SRC_ORIGIN = { ".env": "via .env", "config.js": "via config.js", "Réglages": "via Réglages" };
 async function renderSources(info) {
   try { info = info || await api("/api/sources"); }
   catch (err) { $("#sources").innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
   $("#sources").innerHTML = Object.entries(SRC_META).map(([n, m]) => {
-    const s = info[n], eff = s.effective;
+    const s = info[n], eff = s.effective, fromJs = eff && eff.origin === "config.js";
     let status;
-    if (s.env) status = `Défini dans le .env${s.env_url ? ` (${esc(s.env_url)})` : ""} : à modifier là-bas.`;
-    else if (eff && eff.origin === "config.js") status = `Déduit de config.js : ${esc(eff.url)}. À renseigner seulement si cette adresse n'est pas joignable d'ici.`;
-    else if (eff) status = "Configuré ici.";
-    else status = "Non configuré.";
+    if (s.env) status = `Défini dans le .env${s.env_url ? ` (${esc(s.env_url)})` : ""}. Pour le changer, modifie le .env.`;
+    else if (fromJs) status = "Rien à saisir : adresse et clé lues dans tes lignes torznab de config.js. Remplis les champs seulement pour utiliser une autre adresse.";
+    else if (eff) status = "Adresse et clé enregistrées ici.";
+    else status = "Non configuré : renseigne l'adresse et la clé API, puis teste.";
     const dis = s.env ? "disabled" : "";
-    return `<div class="card" data-src="${n}" data-eff="${esc(eff ? eff.url : "")}"><div class="name">${m.label}</div><div class="meta">${status}</div>
-      <label class="field">Adresse<input type="text" data-f="url" value="${esc(s.url)}" placeholder="${esc(s.detected_url || m.ph)}" autocomplete="off" ${dis}></label>
-      <label class="field">Clé API<input type="password" data-f="apikey" placeholder="${s.has_apikey ? "enregistrée (laisser vide pour la garder)" : ""}" autocomplete="new-password" ${dis}></label>
+    const urlPh = s.env ? s.env_url : fromJs ? `${eff.url} (lue dans config.js)` : m.ph;
+    const keyPh = s.env ? "définie dans le .env" : s.has_apikey ? "enregistrée (laisser vide pour la garder)"
+      : fromJs ? "lue dans config.js" : "";
+    const badge = eff ? `<span class="badge" data-badge>Vérification…</span>` : `<span class="badge">Non configuré</span>`;
+    return `<div class="card" data-src="${n}" data-eff="${esc(eff ? eff.url : "")}" data-origin="${esc(eff ? SRC_ORIGIN[eff.origin] || eff.origin : "")}">
+      <div class="src-head"><span class="name">${m.label}</span>${badge}</div><div class="meta">${status}</div>
+      <label class="field">Adresse<input type="text" data-f="url" value="${esc(s.url)}" placeholder="${esc(urlPh)}" autocomplete="off" ${dis}></label>
+      <label class="field">Clé API<input type="password" data-f="apikey" placeholder="${esc(keyPh)}" autocomplete="new-password" ${dis}></label>
       <div class="src-test"><button class="small ghost" data-test>Tester</button><span data-result></span></div></div>`;
   }).join("");
+  // Vérifie tout de suite la connexion des sources configurées (adresse et clé effectives)
+  $$("#sources [data-badge]").forEach(async (bd) => {
+    const card = bd.closest("[data-src]");
+    try {
+      const r = await api("/api/sources/test", { method: "POST", body: { name: card.dataset.src, url: card.dataset.eff, apikey: "" } });
+      bd.className = "badge ok";
+      bd.textContent = `Connecté ${card.dataset.origin} · ${r.indexers} indexer${r.indexers > 1 ? "s" : ""}`;
+    } catch (err) { bd.className = "badge ko"; bd.textContent = "Injoignable"; bd.title = err.message; }
+  });
 }
 $("#sources").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-test]");
