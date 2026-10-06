@@ -7,28 +7,28 @@ from . import clients, config, logs, xsdb
 
 
 def endpoint():
-    """(adresse, clé, origine) pour joindre Prowlarr : le .env est prioritaire,
-    sinon déduction depuis les lignes Torznab de config.js. None si rien n'est trouvé."""
+    """(adresse, clé, origine) pour joindre Prowlarr : .env, puis Réglages,
+    puis déduction depuis les lignes Torznab de config.js. None si rien n'est trouvé."""
     found = xsdb.prowlarr_from_config()
-    url = config.PROWLARR_URL or (found[0] if found else "")
-    key = config.PROWLARR_APIKEY or (found[1] if found else "")
+    s_url, s_key, origin = config.source("prowlarr")
+    url = s_url or (found[0] if found else "")
+    key = s_key or (found[1] if found else "")
     if not (url and key):
         return None
-    src = ".env" if config.PROWLARR_URL else "config.js"
-    return url.rstrip("/"), key, src
+    return url.rstrip("/"), key, (origin if s_url else "config.js")
 
 
 async def fetch():
     """Indexers et états Prowlarr ; RuntimeError avec un message utile en cas d'échec."""
     ep = endpoint()
     if not ep:
-        raise RuntimeError("Prowlarr introuvable : aucune ligne Torznab Prowlarr dans config.js "
-                           "et PROWLARR_URL / PROWLARR_APIKEY vides dans le .env")
+        raise RuntimeError("Prowlarr non configuré : renseigne son adresse et sa clé API "
+                           "dans Réglages › Sources d'indexers")
     url, key, src = ep
     try:
         return await clients.prowlarr_indexers(url, key)
     except Exception as e:  # noqa: BLE001
-        hint = " : renseigne PROWLARR_URL dans le .env" if src == "config.js" else ""
+        hint = " : renseigne son adresse dans Réglages › Sources d'indexers" if src == "config.js" else ""
         raise RuntimeError(f"Prowlarr injoignable à {url} (adresse lue dans {src}){hint}. "
                            f"Détail : {(str(e) or type(e).__name__)[:150]}") from e
 

@@ -313,7 +313,7 @@ async def log_stream(request: Request, kind: str = "info", lines: int = 300):
 
 @app.get("/api/settings")
 async def get_settings():
-    return config.load_settings()
+    return config.public_settings(config.load_settings())
 
 
 @app.put("/api/settings")
@@ -323,7 +323,69 @@ async def put_settings(body: dict):
             re.compile(config.rule_pattern(r) if r.get("type") else r.get("pattern", ""))
         except re.error as e:
             raise HTTPException(400, f"Expression invalide pour « {r.get('name') or r.get('value')} » : {e}") from e
-    return config.save_settings(body)
+    body.pop("sources", None)   # les sources passent par /api/sources
+    try:
+        return config.public_settings(config.save_settings(body))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+
+
+# --- sources d'indexers (Prowlarr, Jackett) ---------------------------------------
+
+def _sources_info() -> dict:
+    """État de chaque source pour l'onglet Réglages, sans jamais renvoyer de clé API."""
+    saved = config.load_settings()["sources"]
+    found = {"prowlarr": xsdb.prowlarr_from_config(), "jackett": xsdb.jackett_from_config()}
+    out = {}
+    for n in config.SOURCES:
+        env_url, env_key = config.env_source(n)
+        ep = (prowlarr if n == "prowlarr" else jackett).endpoint()
+        out[n] = {
+            "url": saved[n]["url"], "has_apikey": bool(saved[n]["apikey"]),
+            "env": bool(env_url or env_key), "env_url": env_url,
+            "detected_url": found[n][0] if found[n] else "",
+            "effective": {"url": ep[0], "origin": ep[2]} if ep else None,
+        }
+    return out
+
+
+@app.get("/api/sources")
+async def get_sources():
+    return await asyncio.to_thread(_sources_info)
+
+
+@app.put("/api/sources")
+async def put_sources(body: dict):
+    try:
+        await asyncio.to_thread(config.save_settings, {"sources": body})
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+    prowlarr._names_cache["ts"] = 0
+    jackett._names_cache["ts"] = 0
+    return await asyncio.to_thread(_sources_info)
+
+
+@app.post("/api/sources/test")
+async def test_source(body: dict):
+    """Teste une adresse et une clé avant enregistrement. Clé vide : celle déjà enregistrée."""
+    name = body.get("name")
+    if name not in config.SOURCES:
+        raise HTTPException(400, "Source inconnue")
+    url = str(body.get("url", "")).strip().rstrip("/")
+    ep = (prowlarr if name == "prowlarr" else jackett).endpoint()
+    key = (str(body.get("apikey") or "").strip() or config.load_settings()["sources"][name]["apikey"]
+           or (ep[1] if ep else ""))
+    if not (url and key):
+        raise HTTPException(400, "Adresse et clé API nécessaires")
+    try:
+        if name == "prowlarr":
+            indexers, _ = await clients.prowlarr_indexers(url, key)
+            n = sum(i.get("protocol") == "torrent" for i in indexers)
+        else:
+            n = len(jackett._parse(await clients.jackett_indexers(url, key)))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Échec : {xsdb.mask(str(e) or type(e).__name__)[:200]}") from e
+    return {"ok": True, "indexers": n}
 
 
 # --- interface ----------------------------------------------------------------

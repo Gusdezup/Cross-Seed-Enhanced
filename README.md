@@ -37,9 +37,7 @@ docker compose up -d
 
 Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, ainsi que `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
 
-**Prowlarr** : rien à configurer si tes lignes `torznab` pointent vers Prowlarr (`http://…:9696/<id>/api?apikey=…`). L'adresse et la clé en sont déduites. Renseigne `PROWLARR_URL` et `PROWLARR_APIKEY` seulement si cette adresse n'est pas joignable depuis le conteneur de l'interface (par exemple `http://prowlarr:9696` sur un réseau Docker auquel il n'appartient pas).
-
-**Jackett** : même principe, en plus ou à la place de Prowlarr. L'adresse et la clé sont déduites des lignes `torznab` qui pointent vers Jackett (`http://…:9117/api/v2.0/indexers/<id>/results/torznab/api?apikey=…`) ; sinon, renseigne `JACKETT_URL` et `JACKETT_APIKEY`. Seule la clé API est nécessaire, même si Jackett a un mot de passe admin. Un tracker déclaré à la fois dans Prowlarr et dans Jackett est signalé comme doublon.
+**Prowlarr et Jackett** (facultatifs, l'un, l'autre ou les deux) : ils permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à configurer si tes lignes `torznab` pointent déjà vers eux (`http://…:9696/<id>/api?apikey=…` pour Prowlarr, `http://…:9117/api/v2.0/indexers/<id>/results/torznab/api?apikey=…` pour Jackett) : l'adresse et la clé en sont déduites. Sinon, renseigne-les dans **Réglages › Sources d'indexers**, avec un bouton pour tester la connexion. L'adresse est écrite telle quelle dans `config.js` : elle doit être joignable par cross-seed comme par l'interface (par exemple `http://jackett:9117` si les trois conteneurs partagent un réseau Docker). Pour Jackett, seule la clé API est nécessaire, même avec un mot de passe admin. Un tracker déclaré à la fois dans Prowlarr et dans Jackett est signalé comme doublon. Les variables `PROWLARR_URL` / `PROWLARR_APIKEY` et `JACKETT_URL` / `JACKETT_APIKEY` du `.env` restent possibles et prioritaires sur les Réglages.
 
 Le compose utilise l'image publiée sur `ghcr.io`. Pour construire depuis les sources, remplace la ligne `image:` par `build: .`.
 
@@ -49,6 +47,7 @@ Sur Synology, crée le dossier `data` avant le premier lancement (`mkdir -p data
 
 - Sans `UI_PASSWORD`, l'interface n'a pas d'authentification. Ne l'expose pas sur Internet ; derrière un reverse proxy, renseigne `UI_PASSWORD`.
 - Le bouton « Redémarrer cross-seed » passe par [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy), configuré pour n'autoriser que le redémarrage, l'arrêt et le kill d'un conteneur. L'interface ne peut ni créer, ni supprimer, ni lister de conteneur, ni exécuter de commande. Pour s'en passer, supprime le service `xse-docker-proxy` et la variable `DOCKER_URL` du compose : le bouton disparaît.
+- Les clés API saisies dans Réglages › Sources d'indexers sont stockées dans `data/settings.json` (droits 600) et ne sont jamais renvoyées au navigateur.
 - Seuls `config.js` et le dossier `cross-seeds/` sont montés en écriture. La base `cross-seed.db` et les logs sont en lecture seule.
 
 ## Limites connues

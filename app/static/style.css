@@ -212,6 +212,15 @@ tr.detail td { background: var(--raised); }
 .xsform .help.bad { color: var(--danger); }
 .xsform .help.warn { color: var(--accent); }
 .xsform input.dirty, .xsform select.dirty { border-color: var(--accent); }
+.sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+.sources .card { margin: 0; }
+.sources .name { font-weight: 600; }
+.sources .meta { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
+.sources .field { margin-bottom: 10px; }
+.sources .field input { width: 100%; }
+.sources .src-test { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.sources .ok-msg { color: var(--ok); }
+.sources .ko-msg { color: var(--danger); }
 .savebar { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
 
 /* --- toast --- */

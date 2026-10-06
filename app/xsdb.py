@@ -242,9 +242,10 @@ def torznab_url(prowlarr_id: int) -> str:
         m = _TPL_RE.match(e["url"])
         if m:
             return f"{m['prefix']}/{prowlarr_id}/api?apikey={m['key']}"
-    if not (config.PROWLARR_URL and config.PROWLARR_APIKEY):
+    url, key, _ = config.source("prowlarr")
+    if not (url and key):
         raise ValueError("Aucune ligne Torznab existante à imiter et Prowlarr non configuré")
-    return f"{config.PROWLARR_URL}/{prowlarr_id}/api?apikey={config.PROWLARR_APIKEY}"
+    return f"{url}/{prowlarr_id}/api?apikey={key}"
 
 
 _JK_RE = re.compile(r"^(?P<prefix>.*)/api/v2\.0/indexers/(?P<id>[^/]+)/results/torznab/api\?apikey=(?P<key>[^&\s'\"`]+)$")
@@ -265,9 +266,10 @@ def jackett_torznab_url(jackett_id: str) -> str:
         m = _JK_RE.match(e["url"])
         if m:
             return f"{m['prefix']}/api/v2.0/indexers/{jackett_id}/results/torznab/api?apikey={m['key']}"
-    if not (config.JACKETT_URL and config.JACKETT_APIKEY):
+    url, key, _ = config.source("jackett")
+    if not (url and key):
         raise ValueError("Aucune ligne Torznab Jackett à imiter et Jackett non configuré")
-    return f"{config.JACKETT_URL}/api/v2.0/indexers/{jackett_id}/results/torznab/api?apikey={config.JACKETT_APIKEY}"
+    return f"{url}/api/v2.0/indexers/{jackett_id}/results/torznab/api?apikey={key}"
 
 
 def _indent(line: str) -> str:

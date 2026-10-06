@@ -43,7 +43,10 @@ DEFAULT_SETTINGS = {
     "delay": 60,
     "rules": [],
     "tracker_aliases": {},
+    # Sources d'indexers saisies dans l'interface (le .env reste prioritaire)
+    "sources": {"prowlarr": {"url": "", "apikey": ""}, "jackett": {"url": "", "apikey": ""}},
 }
+SOURCES = ("prowlarr", "jackett")
 
 _lock = threading.Lock()
 
@@ -96,7 +99,41 @@ def load_settings() -> dict:
     merged = json.loads(json.dumps(DEFAULT_SETTINGS))
     merged.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
     merged["rules"] = [{k: v for k, v in _upgrade(r).items() if k != "name"} for r in merged["rules"]]
+    src = data.get("sources") if isinstance(data.get("sources"), dict) else {}
+    merged["sources"] = {n: {"url": str((src.get(n) or {}).get("url", "")),
+                             "apikey": str((src.get(n) or {}).get("apikey", ""))} for n in SOURCES}
     return merged
+
+
+def public_settings(s: dict) -> dict:
+    """Réglages renvoyés au navigateur : jamais les clés API."""
+    return {k: v for k, v in s.items() if k != "sources"}
+
+
+def env_source(name: str) -> tuple:
+    return {"prowlarr": (PROWLARR_URL, PROWLARR_APIKEY), "jackett": (JACKETT_URL, JACKETT_APIKEY)}[name]
+
+
+def source(name: str) -> tuple:
+    """(adresse, clé, origine) d'une source d'indexers : .env, sinon Réglages, sinon vide."""
+    url, key = env_source(name)
+    if url or key:
+        return url, key, ".env"
+    s = load_settings()["sources"][name]
+    if s["url"] or s["apikey"]:
+        return s["url"], s["apikey"], "Réglages"
+    return "", "", ""
+
+
+def _clean_source(new: dict, old: dict) -> dict:
+    url = str(new.get("url", "")).strip().rstrip("/")
+    if url and not re.match(r"^https?://[^\s/]+", url):
+        raise ValueError(f"Adresse invalide : {url} (attendu : http://hôte:port)")
+    key = new.get("apikey")
+    key = old["apikey"] if key is None else str(key).strip()   # None : clé inchangée
+    if not url:
+        key = ""
+    return {"url": url, "apikey": key}
 
 
 def save_settings(data: dict) -> dict:
@@ -114,6 +151,10 @@ def save_settings(data: dict) -> dict:
                 continue
             rules.append(rule)
         clean["rules"] = rules
+    if isinstance(data.get("sources"), dict):
+        for n in SOURCES:
+            if isinstance(data["sources"].get(n), dict):
+                clean["sources"][n] = _clean_source(data["sources"][n], clean["sources"][n])
     if "tracker_aliases" in data:
         clean["tracker_aliases"] = {str(k): str(v).strip()
                                     for k, v in data["tracker_aliases"].items() if str(v).strip()}
@@ -121,5 +162,6 @@ def save_settings(data: dict) -> dict:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = _settings_path().with_suffix(".tmp")
         tmp.write_text(json.dumps(clean, indent=2, ensure_ascii=False))
+        tmp.chmod(0o600)   # contient les clés API des sources d'indexers
         tmp.replace(_settings_path())
     return clean

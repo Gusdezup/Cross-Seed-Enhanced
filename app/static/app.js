@@ -434,7 +434,8 @@ function renderIndexers() {
   });
   const px = d.prowlarr || {};
   let pxHtml = "";
-  if (!px.configured) pxHtml = `<p class="muted">Aucune ligne Torznab Prowlarr dans config.js : renseigne PROWLARR_URL et PROWLARR_APIKEY dans le .env pour ajouter des indexers depuis Prowlarr.</p>`;
+  const goSrc = `<a href="#settings" data-goto-sources>Réglages › Sources d'indexers</a>`;
+  if (!px.configured) pxHtml = `<p class="muted">Prowlarr n'est pas configuré. Pour ajouter des indexers depuis Prowlarr ou Jackett, renseigne l'un ou l'autre dans ${goSrc}.</p>`;
   else if (px.error) pxHtml = `<p class="muted">${esc(px.error)}</p>`;
   else if (px.absent.length) pxHtml = `<div class="idx">${px.absent.map((p) => `<div class="card absent">
       <div class="name" style="color:${trackerColor(p.name)}">${esc(p.name)}</div>
@@ -450,9 +451,11 @@ function renderIndexers() {
       <div class="meta">Dans Jackett, pas utilisé par cross-seed</div>${pxWarnings(p, "deja")}
       <div class="card-foot"><span></span><button class="small" data-add-jackett="${esc(p.id)}">Ajouter</button></div></div>`).join("")}</div>`;
   else if (jk.configured) jkHtml = `<p class="muted">Tous tes indexers Jackett sont déjà dans cross-seed.</p>`;
+  else if (px.configured) jkHtml = `<p class="muted">Tu utilises aussi Jackett ? Renseigne-le dans ${goSrc}.</p>`;
   $("#idx-list").innerHTML = (d.error ? `<p class="muted">Base cross-seed : ${esc(d.error)}</p>` : "") +
     (cards.length ? `<div class="idx">${cards.join("")}</div>` : `<p class="empty">Aucun indexer trouvé.</p>`) +
-    `<h3>Disponibles dans Prowlarr</h3>${pxHtml}` + (jkHtml ? `<h3>Disponibles dans Jackett</h3>${jkHtml}` : "");
+    (px.configured || !jk.configured ? `<h3>Disponibles dans Prowlarr</h3>${pxHtml}` : "") +
+    (jkHtml ? `<h3>Disponibles dans Jackett</h3>${jkHtml}` : "");
   // Toujours disponible ; mis en avant seulement quand une modification attend un redémarrage.
   const rb = $("#idx-restart");
   rb.hidden = !state.restartAvailable;
@@ -668,8 +671,63 @@ async function renderSettings() {
   $("#set-delay").value = state.settings.delay;
   renderRules();
   renderAliases();
+  renderSources();
   renderXsForm();
 }
+
+// ---------- sources d'indexers ----------
+const SRC_META = {
+  prowlarr: { label: "Prowlarr", ph: "http://prowlarr:9696" },
+  jackett: { label: "Jackett", ph: "http://jackett:9117" },
+};
+async function renderSources(info) {
+  try { info = info || await api("/api/sources"); }
+  catch (err) { $("#sources").innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  $("#sources").innerHTML = Object.entries(SRC_META).map(([n, m]) => {
+    const s = info[n], eff = s.effective;
+    let status;
+    if (s.env) status = `Défini dans le .env${s.env_url ? ` (${esc(s.env_url)})` : ""} : à modifier là-bas.`;
+    else if (eff && eff.origin === "config.js") status = `Déduit de config.js : ${esc(eff.url)}. À renseigner seulement si cette adresse n'est pas joignable d'ici.`;
+    else if (eff) status = "Configuré ici.";
+    else status = "Non configuré.";
+    const dis = s.env ? "disabled" : "";
+    return `<div class="card" data-src="${n}" data-eff="${esc(eff ? eff.url : "")}"><div class="name">${m.label}</div><div class="meta">${status}</div>
+      <label class="field">Adresse<input type="text" data-f="url" value="${esc(s.url)}" placeholder="${esc(s.detected_url || m.ph)}" autocomplete="off" ${dis}></label>
+      <label class="field">Clé API<input type="password" data-f="apikey" placeholder="${s.has_apikey ? "enregistrée (laisser vide pour la garder)" : ""}" autocomplete="new-password" ${dis}></label>
+      <div class="src-test"><button class="small ghost" data-test>Tester</button><span data-result></span></div></div>`;
+  }).join("");
+}
+$("#sources").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-test]");
+  if (!b) return;
+  const card = b.closest("[data-src]"), out = card.querySelector("[data-result]");
+  const url = card.querySelector('[data-f="url"]').value.trim() || card.dataset.eff;
+  b.disabled = true; out.className = ""; out.textContent = "Test…";
+  try {
+    const r = await api("/api/sources/test", { method: "POST",
+      body: { name: card.dataset.src, url, apikey: card.querySelector('[data-f="apikey"]').value } });
+    out.className = "ok-msg"; out.textContent = `OK : ${r.indexers} indexer${r.indexers > 1 ? "s" : ""} trouvé${r.indexers > 1 ? "s" : ""}`;
+  } catch (err) { out.className = "ko-msg"; out.textContent = err.message; }
+  b.disabled = false;
+});
+$("#src-save").addEventListener("click", async (e) => {
+  const body = {};
+  $$("#sources [data-src]").forEach((card) => {
+    const url = card.querySelector('[data-f="url"]'), key = card.querySelector('[data-f="apikey"]');
+    if (url.disabled) return;
+    body[card.dataset.src] = { url: url.value.trim(), apikey: key.value.trim() || null };
+  });
+  e.target.disabled = true;
+  try {
+    await renderSources(await api("/api/sources", { method: "PUT", body }));
+    toast("Sources enregistrées");
+  } catch (err) { toast(err.message, true); }
+  e.target.disabled = false;
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-goto-sources]")) return;
+  setTimeout(() => $("#sources-h").scrollIntoView({ behavior: "smooth" }), 50);
+});
 
 const XS_HELP = {
   action: "inject : ajoute les cross-seeds dans qBittorrent ; save : enregistre seulement les .torrent",
