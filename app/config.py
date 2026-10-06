@@ -20,14 +20,16 @@ UI_PASSWORD = os.environ.get("UI_PASSWORD", "")
 
 # Lecture seule (instance de dev) : aucune action sur cross-seed, aucune écriture de config.js.
 READONLY = os.environ.get("XSE_READONLY", "").strip().lower() in ("1", "true", "yes", "on")
+# Exception à la lecture seule : écriture de config.js autorisée quand c'est une copie locale (dev).
+ALLOW_CONFIG_WRITE = os.environ.get("XSE_ALLOW_CONFIG_WRITE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 class ReadOnlyError(RuntimeError):
     """Action refusée parce que XSE tourne en lecture seule."""
 
 
-def guard(action: str) -> None:
-    if READONLY:
+def guard(action: str, *, config_write: bool = False) -> None:
+    if READONLY and not (config_write and ALLOW_CONFIG_WRITE):
         raise ReadOnlyError(f"Lecture seule (XSE_READONLY) : {action} désactivé")
 
 LOGS_DIR = XS_CONFIG_DIR / "logs"

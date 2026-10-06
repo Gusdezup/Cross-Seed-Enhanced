@@ -303,7 +303,7 @@ def remove_indexer(key: str) -> dict:
 
 
 def _write_config(old: str, new: str) -> dict:
-    config.guard("modification de config.js")
+    config.guard("modification de config.js", config_write=True)
     backups = config.DATA_DIR / "backups"
     backups.mkdir(parents=True, exist_ok=True)
     backup = backups / f"config.js.{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.bak"
