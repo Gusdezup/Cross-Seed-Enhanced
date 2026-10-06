@@ -34,6 +34,7 @@ async def xs_ping() -> bool:
 
 
 async def xs_webhook(payload: dict) -> int:
+    config.guard("envoi de recherche à cross-seed")
     r = await _http.post(f"{config.XS_URL}/api/webhook", data=payload,
                          headers={"X-Api-Key": config.XS_APIKEY}, timeout=300)
     if r.status_code >= 400:
@@ -42,6 +43,7 @@ async def xs_webhook(payload: dict) -> int:
 
 
 async def xs_job(name: str) -> dict:
+    config.guard(f"lancement du job {name}")
     r = await _http.post(f"{config.XS_URL}/api/job", json={"name": name},
                          headers={"X-Api-Key": config.XS_APIKEY}, timeout=15)
     try:
@@ -53,6 +55,7 @@ async def xs_job(name: str) -> dict:
 
 async def xs_restart() -> None:
     """Redémarre le conteneur cross-seed via un proxy du socket Docker limité aux redémarrages."""
+    config.guard("redémarrage de cross-seed")
     if not config.DOCKER_URL:
         raise RuntimeError("Redémarrage non configuré (DOCKER_URL vide)")
     r = await _http.post(f"{config.DOCKER_URL}/containers/{config.XS_CONTAINER}/restart",

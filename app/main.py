@@ -62,7 +62,8 @@ async def status():
         out["xs"] = {"ok": await clients.xs_ping()}
     except Exception as e:  # noqa: BLE001
         out["xs"]["error"] = str(e)[:200]
-    out["restart_available"] = bool(config.DOCKER_URL)
+    out["restart_available"] = bool(config.DOCKER_URL) and not config.READONLY
+    out["readonly"] = config.READONLY
     out["files"] = {
         "config": config.XS_CONFIG_JS.exists(),
         "logs": config.LOGS_DIR.is_dir(),
@@ -169,12 +170,13 @@ async def pending():
                         mtime=datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"))
             info["errors"] = await asyncio.to_thread(logs.errors_for, info["hash"][:8]) if info["hash"] else []
             items.append(info)
-    writable = config.PENDING_DIR.is_dir() and os.access(config.PENDING_DIR, os.W_OK)
+    writable = config.PENDING_DIR.is_dir() and os.access(config.PENDING_DIR, os.W_OK) and not config.READONLY
     return {"items": items, "writable": writable}
 
 
 @app.delete("/api/pending/{filename}")
 async def pending_delete(filename: str):
+    config.guard("suppression de fichiers en attente")
     p = (config.PENDING_DIR / filename).resolve()
     if p.parent != config.PENDING_DIR.resolve() or p.suffix != ".torrent" or not p.exists():
         raise HTTPException(404, "Fichier introuvable")
@@ -338,3 +340,11 @@ _INDEX = _versioned_index()
 @app.get("/")
 async def index():
     return HTMLResponse(_INDEX, headers={"Cache-Control": "no-cache"})
+
+
+from fastapi.responses import JSONResponse as _JSONResponse  # noqa: E402
+
+
+@app.exception_handler(config.ReadOnlyError)
+async def _readonly_error(request, exc):
+    return _JSONResponse(status_code=403, content={"detail": str(exc)})

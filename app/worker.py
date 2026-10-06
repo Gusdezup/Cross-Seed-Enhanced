@@ -95,8 +95,8 @@ class SearchQueue:
         pending = sum(1 for i in self.items if i["status"] == "pending")
         wait = max(0, int(self.last_sent + delay - time.time()))
         return {
-            "paused": self.paused, "delay": delay, "pending": pending,
-            "next_in": wait if pending and not self.paused else None,
+            "paused": self.paused or config.READONLY, "delay": delay, "pending": pending,
+            "next_in": wait if pending and not (self.paused or config.READONLY) else None,
             "eta_seconds": (wait + max(0, pending - 1) * delay) if pending else 0,
             "items": [{k: v for k, v in i.items() if k != "payload"} | {"target": next(iter(i["payload"].values()))}
                       for i in self.items[-400:]],
@@ -106,7 +106,7 @@ class SearchQueue:
     async def run(self):
         while True:
             item = next((i for i in self.items if i["status"] == "pending"), None)
-            if self.paused or item is None:
+            if self.paused or config.READONLY or item is None:
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=2)

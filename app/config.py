@@ -18,6 +18,18 @@ XS_CONTAINER = os.environ.get("XS_CONTAINER", "cross-seed")
 UI_USER = os.environ.get("UI_USER", "admin")
 UI_PASSWORD = os.environ.get("UI_PASSWORD", "")
 
+# Lecture seule (instance de dev) : aucune action sur cross-seed, aucune écriture de config.js.
+READONLY = os.environ.get("XSE_READONLY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+class ReadOnlyError(RuntimeError):
+    """Action refusée parce que XSE tourne en lecture seule."""
+
+
+def guard(action: str) -> None:
+    if READONLY:
+        raise ReadOnlyError(f"Lecture seule (XSE_READONLY) : {action} désactivé")
+
 LOGS_DIR = XS_CONFIG_DIR / "logs"
 PENDING_DIR = XS_CONFIG_DIR / "cross-seeds"
 XS_DB = XS_CONFIG_DIR / "cross-seed.db"
