@@ -61,14 +61,25 @@ def _domain(host: str) -> str:
     return host if re.fullmatch(r"[\d.]+", host or "") else ".".join((host or "").split(".")[-2:])
 
 
-def build(torrents: list, settings: dict, site_names: dict | None = None) -> list:
-    """site_names : {domaine: nom} venant de Prowlarr, utilisé quand aucun nom n'est saisi dans les réglages."""
+def make_resolver(settings: dict, site_names: dict | None = None):
+    """Nom affiché d'un tracker à partir d'un nom d'hôte : alias des réglages, puis nom Prowlarr/Jackett
+    du domaine, puis nom Prowlarr/Jackett de même nom de base (tk.v3x.tw -> V3X), puis le domaine."""
     aliases = settings.get("tracker_aliases", {})
     site_names = site_names or {}
-    # Même site annonçant sur un autre domaine (ex. tk.v3x.tw pour v3x.club) : rattaché par le nom de base
     by_base = {}
     for dom, name in site_names.items():
         by_base.setdefault(default_label(dom).lower(), name)
+
+    def resolve(host: str) -> str:
+        host = (host or "").lower()
+        return (aliases.get(host) or site_names.get(_domain(host))
+                or by_base.get(default_label(host).lower()) or default_label(host))
+    return resolve
+
+
+def build(torrents: list, settings: dict, site_names: dict | None = None) -> list:
+    """site_names : {domaine: nom} venant de Prowlarr, utilisé quand aucun nom n'est saisi dans les réglages."""
+    resolve = make_resolver(settings, site_names)
     rules = compile_rules(settings.get("rules", []))
     groups: dict = {}
     for t in torrents:
@@ -90,8 +101,7 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
                 "hash": t["hash"],
                 "name": t["name"],
                 "host": host,
-                "tracker": (aliases.get(host) or site_names.get(_domain(host))
-                            or by_base.get(default_label(host).lower()) or default_label(host)),
+                "tracker": resolve(host),
                 "cross_seed": is_cross_seed(t),
                 "category": t.get("category") or "",
                 "state": t.get("state") or "",
@@ -113,17 +123,86 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
             "added_on": min(c["added_on"] for c in copies),
             "category": release_category(orig, ts),
             "last_search": None,
+            "trackers": [],
+            "seeds": len({c["tracker"] for c in copies}),
+            "available": 0,
         })
     releases.sort(key=lambda r: r["name"].lower())
     _cache["by_key"] = {r["key"]: r for r in releases}
     return releases
 
 
-def attach_last_search(items: list, last: dict) -> None:
-    """last : {nom de searchee: date ISO}. Garde la recherche la plus récente parmi les copies."""
+def _key(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (label or "").lower())
+
+
+STATE_ORDER = {"seed": 0, "available": 1, "nomatch": 2, "never": 3}
+
+
+def attach_trackers(items: list, state: dict, indexers: dict, all_hashes: set, resolve) -> None:
+    """Pour chaque release, l'état de chaque tracker :
+    seed      — une copie est dans qBittorrent ;
+    available — cross-seed a trouvé une correspondance dont le torrent n'est pas dans qBittorrent ;
+    nomatch   — cherchée sur ce tracker, sans correspondance utilisable ;
+    never     — indexer actif dans config.js, jamais interrogé pour cette release.
+    indexers : {id cross-seed: {"label", "active"}} ; state : xsdb.search_state()."""
+    searches, decisions = state.get("searches", {}), state.get("decisions", {})
+    known = {_key(i["label"]): i["label"] for i in indexers.values()}
+
+    def label_of(source: str) -> str:
+        if source.startswith("name:"):
+            name = source[5:]
+            return known.get(_key(name), name)
+        return resolve(source) if source else "?"
+
     for r in items:
-        dates = [last[n] for c in r["copies"] for n in (c["name"], c["path"]) if n and n in last]
-        r["last_search"] = max(dates) if dates else None
+        names = {n for c in r["copies"] for n in (c["name"], c["path"]) if n}
+        tr: dict = {}
+
+        def slot(label):
+            return tr.setdefault(_key(label), {"label": label, "state": None, "origin": False,
+                                               "last_search": None, "match": None, "copies": []})
+        for c in r["copies"]:
+            t = slot(c["tracker"])
+            t["state"] = "seed"
+            t["origin"] = t["origin"] or not c["cross_seed"]
+            t["copies"].append(c["hash"])
+        last_any = []
+        for n in names:
+            for idx, last in searches.get(n, []):
+                info = indexers.get(idx)
+                if not info:
+                    continue   # indexer retiré de config.js
+                t = slot(info["label"])
+                if last and (not t["last_search"] or last > t["last_search"]):
+                    t["last_search"] = last
+                if last:
+                    last_any.append(last)
+                if t["state"] is None:
+                    t["state"] = "nomatch"
+            for source, ih, dec, _seen in decisions.get(n, []):
+                if dec not in MATCHES:
+                    continue
+                t = slot(label_of(source))
+                if ih and ih in all_hashes:
+                    # torrent déjà présent : en seed (ou en cours) sur ce tracker
+                    if t["state"] != "seed":
+                        t["state"] = "seed"
+                elif t["state"] != "seed":
+                    t["state"] = "available"
+                    t["match"] = dec
+        for i in indexers.values():
+            if i["active"] and _key(i["label"]) not in tr:
+                slot(i["label"])["state"] = "never"
+        for t in tr.values():
+            t["state"] = t["state"] or "nomatch"
+        r["trackers"] = sorted(tr.values(), key=lambda t: (STATE_ORDER[t["state"]], t["label"].lower()))
+        r["seeds"] = sum(t["state"] == "seed" for t in r["trackers"])
+        r["available"] = sum(t["state"] == "available" for t in r["trackers"])
+        r["last_search"] = max(last_any) if last_any else None
+
+
+MATCHES = {"MATCH", "MATCH_SIZE_ONLY", "MATCH_PARTIAL"}
 
 
 def get(key: str):

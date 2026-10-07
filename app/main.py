@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -83,13 +84,41 @@ async def list_releases(refresh: bool = False):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"qBittorrent injoignable : {e}") from e
     settings = config.load_settings()
-    items = releases.build(torrents, settings, {**await jackett.site_names(), **await prowlarr.site_names()})
-    releases.attach_last_search(items, await asyncio.to_thread(xsdb.last_searched))
+    names = {**await jackett.site_names(), **await prowlarr.site_names()}
+    items = releases.build(torrents, settings, names)
+    resolve = releases.make_resolver(settings, names)
+    try:
+        all_hashes = await clients.qbit_hashes()
+    except Exception:  # noqa: BLE001
+        all_hashes = {t["hash"].lower() for t in torrents}
+    state = await asyncio.to_thread(xsdb.search_state)
+    releases.attach_trackers(items, state, await _indexer_labels(resolve), all_hashes, resolve)
     trackers = {}
     for r in items:
         for c in r["copies"]:
             trackers.setdefault(c["host"], c["tracker"])
     return {"releases": items, "trackers": trackers, "torrents": len(torrents)}
+
+
+_idx_cache = {"ts": 0.0, "data": None}
+
+
+async def _indexer_labels(resolve) -> dict:
+    """{id cross-seed: {"label", "active"}} pour les indexers présents dans config.js (actifs ou suspendus).
+    Le nom vient du site Prowlarr/Jackett, résolu comme les trackers des torrents. Cache de 5 min."""
+    if _idx_cache["data"] is None or time.time() - _idx_cache["ts"] > 300:
+        data = await asyncio.to_thread(xsdb.indexers)
+        await prowlarr.enrich(data)
+        await jackett.enrich(data)
+        _idx_cache.update(ts=time.time(), data=data)
+    out = {}
+    for it in _idx_cache["data"]["items"]:
+        if it.get("id") is None or not it.get("config"):
+            continue   # retiré de config.js : ses anciennes recherches ne comptent plus
+        site = (it.get("prowlarr") or it.get("jackett") or {}).get("site")
+        out[it["id"]] = {"label": resolve(site) if site else prowlarr.clean_name(it["name"]),
+                         "active": it["config"] == "active"}
+    return out
 
 
 @app.post("/api/releases/history")
@@ -219,6 +248,7 @@ def _config_error(e: Exception) -> HTTPException:
 @app.post("/api/indexers/add")
 async def indexer_add(body: dict):
     """Ajoute un indexer Prowlarr (prowlarr_id) ou Jackett (jackett_id) au tableau torznab de config.js."""
+    _idx_cache["data"] = None
     try:
         if body.get("jackett_id"):
             jid = str(body["jackett_id"])
@@ -237,6 +267,7 @@ async def indexer_add(body: dict):
 @app.post("/api/indexers/remove")
 async def indexer_remove(body: dict):
     """Supprime la ligne d'un indexer du tableau torznab de config.js."""
+    _idx_cache["data"] = None
     try:
         return await asyncio.to_thread(xsdb.remove_indexer, str(body.get("key", "")))
     except (ValueError, OSError) as e:
@@ -245,6 +276,7 @@ async def indexer_remove(body: dict):
 
 @app.post("/api/indexers/toggle")
 async def indexer_toggle(body: dict):
+    _idx_cache["data"] = None
     try:
         res = await asyncio.to_thread(xsdb.set_indexer, str(body.get("key", "")), bool(body.get("enable")))
     except PermissionError as e:

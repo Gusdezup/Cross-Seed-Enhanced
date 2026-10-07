@@ -43,7 +43,8 @@
         <select id="rel-filter" aria-label="Filtre">
           <option value="all">Toutes les releases</option>
           <option value="rules">Prioritaires (règles)</option>
-          <option value="single">Une seule copie</option>
+          <option value="available">Cross-seed possible non injecté</option>
+          <option value="single">En seed sur un seul tracker</option>
           <option value="noorig">Sans torrent d'origine</option>
         </select>
         <select id="rel-tracker" aria-label="Tracker"><option value="">Tous les trackers</option></select>
@@ -60,6 +61,13 @@
         <button class="ghost" id="rel-clear-sel">Désélectionner</button>
       </div>
       <p class="summary" id="rel-summary"></p>
+      <p class="legend" id="rel-legend">
+        <span>Colonne Trackers :</span>
+        <span class="item"><span class="tchip seed sample"><i>✓</i>Tracker</span> déjà en seed</span>
+        <span class="item"><span class="tchip available sample"><i>+</i>Tracker</span> trouvée par cross-seed, pas encore injectée</span>
+        <span class="item"><span class="tchip nomatch sample"><i>–</i>Tracker</span> cherchée, rien trouvé</span>
+        <span>La couleur identifie le tracker. Le détail d'une release (clic sur son nom) liste aussi les indexers jamais interrogés.</span>
+      </p>
       <div class="table-wrap">
         <table class="rel">
           <thead><tr>
@@ -69,7 +77,7 @@
             <th class="c-size" data-sort="size">Taille</th>
             <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
             <th class="c-last" data-sort="last" title="Dernière recherche cross-seed, tous indexers confondus">Dernière recherche</th>
-            <th class="c-copies" data-sort="count" title="Copies dans qBittorrent ; tri par nombre de copies">Copies</th>
+            <th class="c-copies" data-sort="seeds" title="État de la release sur chaque tracker ; tri par nombre de trackers en seed">Trackers</th>
             <th class="c-act"></th>
           </tr></thead>
           <tbody id="rel-body"></tbody>

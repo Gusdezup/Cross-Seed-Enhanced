@@ -126,12 +126,13 @@ document.addEventListener("click", async (e) => {
 // ---------- releases ----------
 // Préférences d'affichage propres à ce navigateur (tri, colonnes masquées)
 const REL_COLS = [
-  ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Copies"],
+  ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Trackers"],
 ];
-const SORT_DEFAULT_DIR = { name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", count: "asc" };
+const SORT_DEFAULT_DIR = { name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", seeds: "asc" };
 function prefGet(k, dflt) { try { const v = localStorage.getItem(`xse.${k}`); return v ? JSON.parse(v) : dflt; } catch { return dflt; } }
 function prefSet(k, v) { try { localStorage.setItem(`xse.${k}`, JSON.stringify(v)); } catch { /* stockage indisponible */ } }
-state.relSort = prefGet("relSort", { key: "count", dir: "asc" });
+state.relSort = prefGet("relSort", { key: "seeds", dir: "asc" });
+if (!(state.relSort.key in SORT_DEFAULT_DIR)) state.relSort = { key: "seeds", dir: "asc" };
 state.relHidden = new Set(prefGet("relHidden", []));
 
 function fmtDay(iso) {
@@ -190,7 +191,8 @@ function filteredReleases() {
   const terms = q.split(/\s+/).filter(Boolean);
   let list = state.releases.filter((r) => {
     if (f === "rules" && !r.rules.length) return false;
-    if (f === "single" && r.count !== 1) return false;
+    if (f === "single" && r.seeds !== 1) return false;
+    if (f === "available" && !r.available) return false;
     if (f === "noorig" && r.has_original) return false;
     if (tr && !r.copies.some((c) => c.tracker === tr)) return false;
     if (catOn && r.category !== cat) return false;
@@ -207,8 +209,8 @@ function filteredReleases() {
     size: (r) => r.size,
     added: (r) => r.added_on,
     last: (r) => r.last_search || "",
-    count: (r) => r.count,
-  }[key] || ((r) => r.count);
+    seeds: (r) => r.seeds,
+  }[key] || ((r) => r.seeds);
   const sign = dir === "desc" ? -1 : 1;
   return list.sort((a, b) => {
     const x = val(a), y = val(b);
@@ -218,10 +220,26 @@ function filteredReleases() {
   });
 }
 
+const TSTATE = {
+  seed: { icon: "✓", text: "déjà en seed" },
+  available: { icon: "+", text: "trouvée par cross-seed, pas encore injectée" },
+  nomatch: { icon: "–", text: "cherchée, rien trouvé" },
+  never: { icon: "·", text: "jamais cherchée sur cet indexer" },
+};
+const MATCH_TEXT = {
+  MATCH: "correspondance exacte", MATCH_SIZE_ONLY: "correspondance par la taille",
+  MATCH_PARTIAL: "correspondance partielle (injectée seulement si matchMode le permet)",
+};
+function tchip(t) {
+  const s = TSTATE[t.state];
+  let tip = `${t.label} : ${s.text}`;
+  if (t.state === "seed") tip += t.origin ? " (torrent d'origine)" : " (ajoutée par cross-seed)";
+  if (t.match) tip += ` — ${MATCH_TEXT[t.match] || t.match}`;
+  if (t.last_search) tip += ` — dernière recherche le ${fmtFull(t.last_search)}`;
+  return `<span class="tchip ${t.state}" style="--c:${trackerColor(t.label)}" title="${esc(tip)}"><i>${s.icon}</i>${esc(t.label)}</span>`;
+}
 function chipsHtml(r) {
-  return r.copies.map((c) =>
-    `<span class="chip${c.cross_seed ? "" : " orig"}" style="--c:${trackerColor(c.tracker)}" title="${esc(c.tracker)}${c.cross_seed ? " (cross-seed)" : " (torrent d'origine)"}">${esc(c.tracker)}</span>`
-  ).join("");
+  return r.trackers.filter((t) => t.state !== "never").map(tchip).join("");
 }
 
 function renderReleases() {
@@ -254,7 +272,6 @@ function renderReleases() {
       </tr>`;
       return row + (state.expanded === r.key ? detailRow(r) : "");
     }).join("");
-    if (state.expanded) loadHistory(state.expanded);
   }
   $("#rel-more").hidden = list.length <= state.limit;
   $("#rel-all").checked = shown.length > 0 && shown.every((r) => state.selected.has(r.key));
@@ -262,34 +279,25 @@ function renderReleases() {
 }
 
 function detailRow(r) {
-  const copies = r.copies.map((c) => `<tr>
-      <td><span class="chip${c.cross_seed ? "" : " orig"}" style="--c:${trackerColor(c.tracker)}">${esc(c.tracker)}</span></td>
-      <td>${c.cross_seed ? "cross-seed" : "origine"}</td>
-      <td>${esc(c.category || "—")}</td>
-      <td class="mono" title="${esc(c.hash)}">${esc(c.hash.slice(0, 10))}…</td>
-    </tr>`).join("");
+  const byHash = new Map(r.copies.map((c) => [c.hash, c]));
+  const rows = r.trackers.map((t) => {
+    const copies = t.copies.map((h) => byHash.get(h)).filter(Boolean).map((c) =>
+      `${c.cross_seed ? "ajoutée par cross-seed" : "torrent d'origine"} · ${esc(c.category || "sans catégorie")} · ` +
+      `<span class="mono" title="${esc(c.hash)}">${esc(c.hash.slice(0, 10))}…</span>`).join("<br>");
+    const extra = t.state === "available" && t.match ? ` <span class="muted">(${esc(MATCH_TEXT[t.match] || t.match)})</span>` : "";
+    return `<tr>
+      <td>${tchip(t)}</td>
+      <td class="tstate ${t.state}">${TSTATE[t.state].text}${extra}</td>
+      <td>${t.last_search ? fmtDate(t.last_search) : "—"}</td>
+      <td>${copies || ""}</td>
+    </tr>`;
+  }).join("");
   const target = r.mode === "hash" ? `hash ${r.payload.infoHash.slice(0, 10)}…` : r.payload.path;
   return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="98">
-    <div class="detail-grid">
-      <div><h4>Copies dans qBittorrent</h4><table class="mini">${copies}</table>
-        <h4 style="margin-top:10px">Cible envoyée à cross-seed</h4><div class="mono">${esc(target)}</div></div>
-      <div><h4>Dernières recherches par indexer</h4><div data-history>Chargement…</div></div>
-    </div></td></tr>`;
-}
-
-async function loadHistory(key) {
-  const box = $(`[data-detail="${CSS.escape(key)}"] [data-history]`);
-  if (!box || box.dataset.loaded) return;
-  box.dataset.loaded = "1";
-  try {
-    const h = await api("/api/releases/history", { method: "POST", body: { key } });
-    if (!h.available) { box.textContent = `Indisponible : ${h.error || "base non lisible"}.`; return; }
-    if (!h.rows.length) { box.textContent = "Jamais cherchée par cross-seed."; return; }
-    const seen = new Map();
-    for (const row of h.rows) if (!seen.has(row.indexer)) seen.set(row.indexer, row);
-    box.innerHTML = `<table class="mini">${[...seen.values()].map((x) =>
-      `<tr><td><span class="chip" style="--c:${trackerColor(x.indexer)}">${esc(x.indexer)}</span></td><td>${fmtDate(x.last)}</td></tr>`).join("")}</table>`;
-  } catch (err) { box.textContent = err.message; }
+    <h4>État par tracker</h4>
+    <table class="mini"><tr><th>Tracker</th><th>État</th><th>Dernière recherche</th><th>Copie dans qBittorrent</th></tr>${rows}</table>
+    <h4 style="margin-top:10px">Cible envoyée à cross-seed</h4><div class="mono">${esc(target)}</div>
+  </td></tr>`;
 }
 
 function updateSelbar() {

@@ -155,6 +155,21 @@ table.rel.hide-last .c-last, table.rel.hide-copies .c-copies { display: none; }
 }
 .chip.orig { background: var(--c); color: var(--bg); font-weight: 600; }
 
+/* État d'une release sur un tracker (liste des releases) */
+.tchip { --c: var(--muted); display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px 1px 6px;
+  border-radius: 999px; white-space: nowrap; border: 1px solid transparent; line-height: 1.5; }
+.tchip i { font-style: normal; font-weight: 700; width: 1em; text-align: center; }
+.tchip.seed { background: var(--c); color: var(--bg); font-weight: 600; }
+.tchip.available { border: 1.5px dashed var(--c); color: var(--c); font-weight: 600;
+  background: color-mix(in srgb, var(--c) 14%, transparent); }
+.tchip.nomatch { border-color: var(--line); color: var(--muted); }
+.tchip.never { border: 1px dotted var(--line); color: var(--muted); opacity: .7; }
+.tchip.sample { --c: var(--text); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12.5px; color: var(--muted); margin: -4px 0 10px; }
+.legend span.item { display: inline-flex; gap: 6px; align-items: center; }
+.tstate { font-size: 12.5px; }
+.tstate.available { color: var(--accent); font-weight: 600; }
+
 tr.detail td { background: var(--raised); }
 .detail-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .detail-grid h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
@@ -274,3 +289,5 @@ tr.detail td { background: var(--raised); }
   main { padding: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+tr.detail h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+tr.detail .mini th { font-size: 12px; padding: 3px 6px; border: 0; }

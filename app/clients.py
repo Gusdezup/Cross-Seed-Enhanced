@@ -9,15 +9,24 @@ _http = httpx.AsyncClient(timeout=30)
 _torrents_cache = {"ts": 0.0, "data": []}
 
 
-async def qbit_torrents(force: bool = False) -> list:
+async def _qbit_all(force: bool = False) -> list:
     if not force and time.time() - _torrents_cache["ts"] < 20:
         return _torrents_cache["data"]
     r = await _http.get(f"{config.QBT_URL}/api/v2/torrents/info",
-                        params={"filter": "completed"},
                         headers={"Authorization": f"Bearer {config.QBT_APIKEY}"})
     r.raise_for_status()
     _torrents_cache.update(ts=time.time(), data=r.json())
     return _torrents_cache["data"]
+
+
+async def qbit_torrents(force: bool = False) -> list:
+    """Torrents terminés (comme le filtre « completed » de qBittorrent)."""
+    return [t for t in await _qbit_all(force) if (t.get("progress") or 0) >= 1]
+
+
+async def qbit_hashes(force: bool = False) -> set:
+    """Hashs de TOUS les torrents présents dans qBittorrent, terminés ou non."""
+    return {(t.get("hash") or "").lower() for t in await _qbit_all(force)}
 
 
 async def qbit_version() -> str:

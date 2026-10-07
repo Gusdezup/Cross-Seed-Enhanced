@@ -8,6 +8,7 @@ simplement « indisponible » si quelque chose manque.
 import re
 import sqlite3
 from datetime import datetime
+from urllib.parse import urlparse
 
 from . import config, logs
 
@@ -135,25 +136,53 @@ def history(names: list) -> dict:
     return out
 
 
-def last_searched() -> dict:
-    """{nom de searchee: date ISO de la dernière recherche, tous indexers confondus}. {} si indisponible."""
+MATCH_DECISIONS = {"MATCH", "MATCH_SIZE_ONLY", "MATCH_PARTIAL"}
+_GUID_PREFIX_RE = re.compile(r"^([A-Za-z][\w .'&+-]*?)-\d+$")
+
+
+def guid_source(guid: str) -> str:
+    """Ce qui identifie le tracker dans un guid, SANS la clé API :
+    le nom d'hôte d'une URL, ou le préfixe d'un guid « PassThePopcorn-744572 »."""
+    guid = guid or ""
+    if "://" in guid:
+        return (urlparse(guid).hostname or "").lower()
+    m = _GUID_PREFIX_RE.match(guid)
+    return f"name:{m.group(1)}" if m else ""
+
+
+def search_state() -> dict:
+    """Recherches (table timestamp) et décisions de cross-seed, par nom de searchee.
+    {"available": bool, "searches": {nom: [(indexer_id, iso)]},
+     "decisions": {nom: [(source, info_hash, decision, iso)]}}"""
+    out = {"available": False, "searches": {}, "decisions": {}}
     try:
         con = _connect()
     except sqlite3.Error:
-        return {}
+        return out
     if not con:
-        return {}
+        return out
     try:
-        tcols, scols = _columns(con, "timestamp"), _columns(con, "searchee")
-        if not ({"searchee_id", "last_searched"} <= tcols and {"id", "name"} <= scols):
-            return {}
-        q = ("SELECT s.name AS name, MAX(t.last_searched) AS last "
-             "FROM timestamp t JOIN searchee s ON s.id = t.searchee_id GROUP BY s.name")
-        return {r["name"]: _ts(r["last"]) for r in con.execute(q) if r["last"]}
+        scols = _columns(con, "searchee")
+        if not {"id", "name"} <= scols:
+            return out
+        if {"searchee_id", "indexer_id", "last_searched"} <= _columns(con, "timestamp"):
+            q = ("SELECT s.name AS name, t.indexer_id AS idx, t.last_searched AS last "
+                 "FROM timestamp t JOIN searchee s ON s.id = t.searchee_id")
+            for r in con.execute(q):
+                out["searches"].setdefault(r["name"], []).append((r["idx"], _ts(r["last"])))
+        if {"searchee_id", "guid", "info_hash", "decision"} <= _columns(con, "decision"):
+            last = "d.last_seen" if "last_seen" in _columns(con, "decision") else "NULL"
+            q = ("SELECT s.name AS name, d.guid AS guid, d.info_hash AS ih, d.decision AS dec, "
+                 f"{last} AS last FROM decision d JOIN searchee s ON s.id = d.searchee_id")
+            for r in con.execute(q):
+                out["decisions"].setdefault(r["name"], []).append(
+                    (guid_source(r["guid"]), (r["ih"] or "").lower(), r["dec"], _ts(r["last"])))
+        out["available"] = True
     except sqlite3.Error:
-        return {}
+        pass
     finally:
         con.close()
+    return out
 
 
 # --- config.js (analyse textuelle, jamais exécutée) ---------------------------
