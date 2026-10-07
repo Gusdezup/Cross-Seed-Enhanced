@@ -112,7 +112,7 @@
       <div class="queue-head">
         <div>
           <h2>Indexers</h2>
-          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
+          <p class="muted" id="idx-intro">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
         </div>
         <div class="btns">
           <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
@@ -157,13 +157,13 @@
       <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>
 
       <h2 id="sources-h">Sources d'indexers</h2>
-      <p class="muted">Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à saisir si tes lignes torznab pointent déjà vers eux : l'adresse et la clé en sont déduites. Sinon, renseigne-les ici. L'adresse est écrite telle quelle dans config.js : elle doit être joignable par cross-seed comme par cette interface. Une valeur définie dans le .env reste prioritaire.</p>
+      <p class="muted" id="src-intro">Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à saisir si tes lignes torznab pointent déjà vers eux : l'adresse et la clé en sont déduites. Sinon, renseigne-les ici. L'adresse est écrite telle quelle dans config.js : elle doit être joignable par cross-seed comme par cette interface. Une valeur définie dans le .env reste prioritaire.</p>
       <div class="sources" id="sources"></div>
       <div class="savebar"><button class="primary" id="src-save">Enregistrer les sources</button></div>
 
       <h2>cross-seed</h2>
-      <p class="muted">Réglages de config.js. Seule la valeur de chaque ligne est modifiée (commentaires conservés) et une copie de sauvegarde est faite dans data/backups. cross-seed ne les prend en compte qu'après un redémarrage.</p>
-      <p class="muted">Durées : un nombre suivi d'une unité en anglais, par exemple 30 minutes, 2 hours, 7 days, 2 weeks (abréviations m, h, d, w acceptées ; pas de mois). Les valeurs sont vérifiées avec les mêmes règles que cross-seed 6.13 avant d'être enregistrées.</p>
+      <p class="muted" id="xs-intro">Réglages de config.js. Seule la valeur de chaque ligne est modifiée (commentaires conservés) et une copie de sauvegarde est faite dans data/backups. cross-seed ne les prend en compte qu'après un redémarrage.</p>
+      <p class="muted" id="xs-duration-intro">Durées : un nombre suivi d'une unité en anglais, par exemple 30 minutes, 2 hours, 7 days, 2 weeks (abréviations m, h, d, w acceptées ; pas de mois). Les valeurs sont vérifiées avec les mêmes règles que cross-seed 6.13 avant d'être enregistrées.</p>
       <div class="xsform" id="xs-form"></div>
       <div class="savebar btns">
         <button class="primary" id="xs-save">Enregistrer dans config.js</button>

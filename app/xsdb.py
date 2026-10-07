@@ -6,6 +6,7 @@ vérifie d'abord les tables et colonnes présentes, et l'interface affiche
 simplement « indisponible » si quelque chose manque.
 """
 import re
+import json
 import sqlite3
 from datetime import datetime
 
@@ -70,13 +71,15 @@ def indexers() -> dict:
                 for r in con.execute("SELECT * FROM indexer"):
                     r = dict(r)
                     url = r.get("url", "")
+                    if config.XS_VERSION == "7" and r.get("apikey"):
+                        url += ("&" if "?" in url else "?") + "apikey=" + r["apikey"]
                     name = r.get("name") or names.get(logs.normalize_url(url)) or fallback_name(url)
                     out["items"].append({
                         "id": r.get("id"),
                         "key": logs.normalize_url(url),
                         "name": name,
                         "url": mask(url),
-                        "active": bool(r.get("active", 1)),
+                        "active": bool(r.get("enabled" if config.XS_VERSION == "7" else "active", 1)),
                         "status": r.get("status") or "OK",
                         "retry_after": _ts(r.get("retry_after")),
                         "snooze_log": snoozes.get(name),
@@ -86,6 +89,10 @@ def indexers() -> dict:
             out["error"] = str(e)
         finally:
             con.close()
+    if config.XS_VERSION == "7":
+        for i in out["items"]:
+            i["config"] = "active" if i["active"] else "suspended"
+        return out
     # État dans config.js : "active", "suspended" (ligne commentée) ou None (retiré)
     entries = {e["key"]: e for e in torznab_entries()}
     known = {i["key"] for i in out["items"]}
@@ -169,6 +176,17 @@ def _torznab_lines(lines: list):
 
 
 def torznab_entries() -> list:
+    if config.XS_VERSION == "7":
+        con = _connect()
+        if not con:
+            return []
+        try:
+            rows = con.execute("SELECT id, url, apikey, enabled FROM indexer").fetchall()
+            return [{"id": r["id"], "url": r["url"] + ("&" if "?" in r["url"] else "?") + "apikey=" + r["apikey"],
+                     "key": logs.normalize_url(r["url"]), "state": "active" if r["enabled"] else "suspended"}
+                    for r in rows if r["url"] and r["apikey"]]
+        finally:
+            con.close()
     lines = _config_text().split("\n")
     rng = _torznab_lines(lines)
     out = []
@@ -370,6 +388,20 @@ def _kind(raw: str) -> str:
 
 def useful_settings() -> dict:
     """{clé: {"value": str, "kind": string|number|boolean|empty|other}}"""
+    if config.XS_VERSION == "7":
+        con = _connect()
+        if not con:
+            return {}
+        try:
+            row = con.execute("SELECT settings_json FROM settings LIMIT 1").fetchone()
+            settings = json.loads(row[0]) if row and row[0] else {}
+            return {k: {"value": str(v).lower() if isinstance(v, bool) else str(v),
+                        "kind": "boolean" if isinstance(v, bool) else "number" if isinstance(v, (int, float)) else "string"}
+                    for k, v in settings.items() if k in USEFUL_KEYS and v is not None}
+        except (sqlite3.Error, ValueError):
+            return {}
+        finally:
+            con.close()
     text = _config_text()
     out = {}
     for key in USEFUL_KEYS:
@@ -501,6 +533,8 @@ def _has_link_dirs() -> bool:
 
 
 def check_settings(changes: dict) -> dict:
+    if config.XS_VERSION == "7":
+        return {"errors": {"version": "Réglez cross-seed v7 dans son interface native"}, "warnings": {}}
     base = {k: v["value"] for k, v in useful_settings().items()}
     values = {**base, **{k: str(v) for k, v in changes.items()}}
     res = validate(values)
@@ -516,6 +550,8 @@ def check_settings(changes: dict) -> dict:
 def update_settings(changes: dict) -> dict:
     """Modifie uniquement la valeur des clés demandées, en conservant commentaires et mise en forme.
     Une copie de sauvegarde est faite dans DATA_DIR/backups avant écriture."""
+    if config.XS_VERSION == "7":
+        raise ValueError("Réglez cross-seed v7 dans son interface native")
     text = _config_text()
     if not text:
         raise ValueError("config.js illisible")
