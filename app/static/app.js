@@ -126,9 +126,9 @@ document.addEventListener("click", async (e) => {
 // ---------- releases ----------
 // Préférences d'affichage propres à ce navigateur (tri, colonnes masquées)
 const REL_COLS = [
-  ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Trackers"],
+  ["rules", "Priorité"], ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Trackers"],
 ];
-const SORT_DEFAULT_DIR = { name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", seeds: "asc" };
+const SORT_DEFAULT_DIR = { rules: "asc", name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", seeds: "asc" };
 function prefGet(k, dflt) { try { const v = localStorage.getItem(`xse.${k}`); return v ? JSON.parse(v) : dflt; } catch { return dflt; } }
 function prefSet(k, v) { try { localStorage.setItem(`xse.${k}`, JSON.stringify(v)); } catch { /* stockage indisponible */ } }
 state.relSort = prefGet("relSort", { key: "seeds", dir: "asc" });
@@ -206,6 +206,8 @@ function filteredReleases() {
   const val = {
     name: (r) => r.name.toLowerCase(),
     category: (r) => (r.category || "").toLowerCase(),
+    // releases prioritaires d'abord, puis par nom de règle
+    rules: (r) => (r.rules.length ? r.rules[0].toLowerCase() : "\uffff"),
     size: (r) => r.size,
     added: (r) => r.added_on,
     last: (r) => r.last_search || "",
@@ -254,13 +256,12 @@ function renderReleases() {
     body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ce filtre.</td></tr>`;
   } else {
     body.innerHTML = shown.map((r) => {
-      const meta = [
-        ...r.rules.map((n) => `<span class="tag rule">${esc(n)}</span>`),
-        r.mode === "path" ? `<span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span>` : "",
-      ].join("");
+      const flag = r.mode === "path"
+        ? `<span class="rflag" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">· sans torrent d'origine</span>` : "";
       const row = `<tr data-key="${esc(r.key)}">
         <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
-        <td><div class="rname" title="Afficher le détail">${esc(r.name)}</div>${meta ? `<div class="rmeta">${meta}</div>` : ""}</td>
+        <td><span class="rname" title="Afficher le détail">${esc(r.name)}</span>${flag}</td>
+        <td class="c-rules">${r.rules.map((n) => `<span class="tag rule">${esc(n)}</span>`).join("")}</td>
         <td class="c-cat">${esc(r.category || "—")}</td>
         <td class="c-size">${fmtSize(r.size)}</td>
         <td class="c-added" title="${esc(fmtFull(r.added_on))}">${fmtDay(r.added_on)}</td>

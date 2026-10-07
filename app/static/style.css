@@ -129,7 +129,7 @@ th[data-sort]:hover { color: var(--text); }
 th[data-sort].sorted { color: var(--text); }
 th[data-sort].sorted::after { content: " ▲"; font-size: 10px; }
 th[data-sort].sorted.desc::after { content: " ▼"; }
-table.rel.hide-cat .c-cat, table.rel.hide-size .c-size, table.rel.hide-added .c-added,
+table.rel.hide-rules .c-rules, table.rel.hide-cat .c-cat, table.rel.hide-size .c-size, table.rel.hide-added .c-added,
 table.rel.hide-last .c-last, table.rel.hide-copies .c-copies { display: none; }
 .colpick { position: relative; }
 .colpick summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
@@ -145,6 +145,9 @@ table.rel.hide-last .c-last, table.rel.hide-copies .c-copies { display: none; }
 .tag { font-size: 11.5px; padding: 0 7px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
 .tag.rule { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 .tag.path { color: var(--muted); border: none; padding: 0; font-style: italic; }
+.c-rules { width: 120px; }
+td.c-rules .tag { display: inline-block; margin: 0 4px 3px 0; white-space: nowrap; }
+.rflag { font-family: var(--sans); font-size: 11.5px; font-style: italic; color: var(--muted); margin-left: 6px; white-space: nowrap; }
 
 /* Copies : une puce par tracker, pleine pour l'origine, contour pour un cross-seed */
 .copies { display: flex; flex-wrap: wrap; gap: 4px; }
