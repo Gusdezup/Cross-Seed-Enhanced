@@ -124,6 +124,39 @@ document.addEventListener("click", async (e) => {
 });
 
 // ---------- releases ----------
+// Préférences d'affichage propres à ce navigateur (tri, colonnes masquées)
+const REL_COLS = [
+  ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Copies"],
+];
+const SORT_DEFAULT_DIR = { name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", count: "asc" };
+function prefGet(k, dflt) { try { const v = localStorage.getItem(`xse.${k}`); return v ? JSON.parse(v) : dflt; } catch { return dflt; } }
+function prefSet(k, v) { try { localStorage.setItem(`xse.${k}`, JSON.stringify(v)); } catch { /* stockage indisponible */ } }
+state.relSort = prefGet("relSort", { key: "count", dir: "asc" });
+state.relHidden = new Set(prefGet("relHidden", []));
+
+function fmtDay(iso) {
+  if (!iso) return "";
+  const d = new Date(typeof iso === "number" ? iso * 1000 : iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+function fmtFull(iso) {
+  if (!iso) return "";
+  const d = new Date(typeof iso === "number" ? iso * 1000 : iso);
+  return isNaN(d) ? String(iso) : d.toLocaleString("fr-FR");
+}
+
+function applyRelColumns() {
+  const t = $("table.rel");
+  for (const [k] of REL_COLS) t.classList.toggle(`hide-${k}`, state.relHidden.has(k));
+  $("#rel-cols-menu").innerHTML = REL_COLS.map(([k, label]) =>
+    `<label><input type="checkbox" data-col="${k}" ${state.relHidden.has(k) ? "" : "checked"}> ${esc(label)}</label>`).join("");
+  for (const th of $$("table.rel th[data-sort]")) {
+    const on = th.dataset.sort === state.relSort.key;
+    th.classList.toggle("sorted", on);
+    th.classList.toggle("desc", on && state.relSort.dir === "desc");
+  }
+}
 async function loadReleases(refresh = false) {
   $("#rel-summary").textContent = "Chargement depuis qBittorrent…";
   try {
@@ -135,38 +168,54 @@ async function loadReleases(refresh = false) {
     const labels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
     sel.innerHTML = `<option value="">Tous les trackers</option>` + labels.map((l) => `<option>${esc(l)}</option>`).join("");
     sel.value = labels.includes(cur) ? cur : "";
+    const csel = $("#rel-cat"), ccur = csel.value;
+    const cats = [...new Set(d.releases.map((r) => r.category))].sort((a, b) => a.localeCompare(b));
+    csel.innerHTML = `<option value="">Toutes les catégories</option>` +
+      cats.map((c) => `<option value="${esc(c)}">${c ? esc(c) : "(sans catégorie)"}</option>`).join("");
+    csel.value = cats.includes(ccur) ? ccur : "";
     for (const k of [...state.selected]) if (!state.releases.some((r) => r.key === k)) state.selected.delete(k);
     $("#cnt-releases").textContent = d.releases.length;
     renderReleases();
     if (state.tab === "settings" && state.settings) { renderRules(); renderAliases(); }
   } catch (err) {
     $("#rel-summary").textContent = err.message;
-    $("#rel-body").innerHTML = `<tr><td colspan="5" class="empty">${esc(err.message)}. Vérifie QBT_URL et QBT_APIKEY.</td></tr>`;
+    $("#rel-body").innerHTML = `<tr><td colspan="99" class="empty">${esc(err.message)}. Vérifie QBT_URL et QBT_APIKEY.</td></tr>`;
   }
 }
 
 function filteredReleases() {
   const q = $("#rel-q").value.trim().toLowerCase();
-  const f = $("#rel-filter").value, tr = $("#rel-tracker").value, sort = $("#rel-sort").value;
+  const f = $("#rel-filter").value, tr = $("#rel-tracker").value, cat = $("#rel-cat").value;
+  const catOn = $("#rel-cat").selectedIndex > 0;
   const terms = q.split(/\s+/).filter(Boolean);
   let list = state.releases.filter((r) => {
     if (f === "rules" && !r.rules.length) return false;
     if (f === "single" && r.count !== 1) return false;
     if (f === "noorig" && r.has_original) return false;
     if (tr && !r.copies.some((c) => c.tracker === tr)) return false;
+    if (catOn && r.category !== cat) return false;
     if (terms.length) {
       const hay = (r.name + " " + r.copies.map((c) => c.tracker).join(" ")).toLowerCase();
       if (!terms.every((t) => hay.includes(t))) return false;
     }
     return true;
   });
-  const by = {
-    count: (a, b) => a.count - b.count || a.name.localeCompare(b.name),
-    name: (a, b) => a.name.localeCompare(b.name),
-    size: (a, b) => b.size - a.size,
-    added: (a, b) => b.added_on - a.added_on,
-  }[sort];
-  return list.sort(by);
+  const { key, dir } = state.relSort;
+  const val = {
+    name: (r) => r.name.toLowerCase(),
+    category: (r) => (r.category || "").toLowerCase(),
+    size: (r) => r.size,
+    added: (r) => r.added_on,
+    last: (r) => r.last_search || "",
+    count: (r) => r.count,
+  }[key] || ((r) => r.count);
+  const sign = dir === "desc" ? -1 : 1;
+  return list.sort((a, b) => {
+    const x = val(a), y = val(b);
+    // Valeurs vides (jamais cherchée, sans catégorie) : toujours en tête en ordre croissant
+    const c = x < y ? -1 : x > y ? 1 : 0;
+    return sign * c || a.name.localeCompare(b.name);
+  });
 }
 
 function chipsHtml(r) {
@@ -184,7 +233,7 @@ function renderReleases() {
     `(${state.torrents} torrents terminés, ${ruleCount} prioritaires).`;
   const body = $("#rel-body");
   if (!shown.length) {
-    body.innerHTML = `<tr><td colspan="5" class="empty">Aucune release ne correspond à ce filtre.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ce filtre.</td></tr>`;
   } else {
     body.innerHTML = shown.map((r) => {
       const meta = [
@@ -194,8 +243,13 @@ function renderReleases() {
       const row = `<tr data-key="${esc(r.key)}">
         <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
         <td><div class="rname" title="Afficher le détail">${esc(r.name)}</div>${meta ? `<div class="rmeta">${meta}</div>` : ""}</td>
+        <td class="c-cat">${esc(r.category || "—")}</td>
         <td class="c-size">${fmtSize(r.size)}</td>
-        <td><div class="copies">${chipsHtml(r)}</div></td>
+        <td class="c-added" title="${esc(fmtFull(r.added_on))}">${fmtDay(r.added_on)}</td>
+        ${r.last_search
+          ? `<td class="c-last" title="${esc(fmtFull(r.last_search))}">${fmtDay(r.last_search)}</td>`
+          : `<td class="c-last never">jamais</td>`}
+        <td class="c-copies"><div class="copies">${chipsHtml(r)}</div></td>
         <td class="c-act"><button class="small" data-search>Chercher</button></td>
       </tr>`;
       return row + (state.expanded === r.key ? detailRow(r) : "");
@@ -215,7 +269,7 @@ function detailRow(r) {
       <td class="mono" title="${esc(c.hash)}">${esc(c.hash.slice(0, 10))}…</td>
     </tr>`).join("");
   const target = r.mode === "hash" ? `hash ${r.payload.infoHash.slice(0, 10)}…` : r.payload.path;
-  return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="4">
+  return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="98">
     <div class="detail-grid">
       <div><h4>Copies dans qBittorrent</h4><table class="mini">${copies}</table>
         <h4 style="margin-top:10px">Cible envoyée à cross-seed</h4><div class="mono">${esc(target)}</div></div>
@@ -277,7 +331,28 @@ $("#rel-more").addEventListener("click", () => { state.limit += 200; renderRelea
 $("#rel-refresh").addEventListener("click", () => loadReleases(true));
 let qTimer;
 $("#rel-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.limit = 200; renderReleases(); }, 150); });
-["#rel-filter", "#rel-tracker", "#rel-sort"].forEach((s) => $(s).addEventListener("change", () => { state.limit = 200; renderReleases(); }));
+$("table.rel thead").addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th) return;
+  const key = th.dataset.sort;
+  state.relSort = state.relSort.key === key
+    ? { key, dir: state.relSort.dir === "asc" ? "desc" : "asc" }
+    : { key, dir: SORT_DEFAULT_DIR[key] || "asc" };
+  prefSet("relSort", state.relSort);
+  state.limit = 200;
+  applyRelColumns();
+  renderReleases();
+});
+$("#rel-cols-menu").addEventListener("change", (e) => {
+  const k = e.target.dataset.col;
+  if (!k) return;
+  e.target.checked ? state.relHidden.delete(k) : state.relHidden.add(k);
+  prefSet("relHidden", [...state.relHidden]);
+  applyRelColumns();
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#rel-cols")) $("#rel-cols").open = false; });
+applyRelColumns();
+["#rel-filter", "#rel-tracker", "#rel-cat"].forEach((s) => $(s).addEventListener("change", () => { state.limit = 200; renderReleases(); }));
 
 // ---------- file de recherche ----------
 const SKIP_WORDS = [

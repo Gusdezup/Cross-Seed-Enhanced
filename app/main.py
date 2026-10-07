@@ -84,6 +84,7 @@ async def list_releases(refresh: bool = False):
         raise HTTPException(502, f"qBittorrent injoignable : {e}") from e
     settings = config.load_settings()
     items = releases.build(torrents, settings, {**await jackett.site_names(), **await prowlarr.site_names()})
+    releases.attach_last_search(items, await asyncio.to_thread(xsdb.last_searched))
     trackers = {}
     for r in items:
         for c in r["copies"]:

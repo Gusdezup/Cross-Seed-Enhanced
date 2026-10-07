@@ -119,6 +119,25 @@ tbody tr:last-child td { border-bottom: 0; }
 .c-act { width: 110px; text-align: right; }
 td.c-size { color: var(--muted); font-variant-numeric: tabular-nums; }
 td.c-act { text-align: right; white-space: nowrap; }
+.c-cat { width: 130px; }
+.c-added, .c-last { width: 105px; white-space: nowrap; }
+td.c-cat { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+td.c-added, td.c-last { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+td.c-last.never { font-style: italic; opacity: .7; }
+th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-sort]:hover { color: var(--text); }
+th[data-sort].sorted { color: var(--text); }
+th[data-sort].sorted::after { content: " ▲"; font-size: 10px; }
+th[data-sort].sorted.desc::after { content: " ▼"; }
+table.rel.hide-cat .c-cat, table.rel.hide-size .c-size, table.rel.hide-added .c-added,
+table.rel.hide-last .c-last, table.rel.hide-copies .c-copies { display: none; }
+.colpick { position: relative; }
+.colpick summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
+.colpick summary::-webkit-details-marker { display: none; }
+.colpick[open] summary { color: var(--text); }
+.colpick-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 4px; min-width: 190px; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
+.colpick-menu label { display: flex; gap: 8px; align-items: center; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 
 .rname { font-family: var(--mono); font-size: 12.5px; word-break: break-all; cursor: pointer; }
 .rname:hover { color: var(--link); }

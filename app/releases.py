@@ -46,6 +46,17 @@ def compile_rules(rules: list) -> list:
     return out
 
 
+def release_category(orig: dict | None, ts: list) -> str:
+    """Catégorie de la release : celle du torrent d'origine, sinon celle d'une copie sans le suffixe .cross-seed."""
+    if orig:
+        return orig.get("category") or ""
+    for t in ts:
+        cat = t.get("category") or ""
+        if cat.endswith(".cross-seed"):
+            return cat[: -len(".cross-seed")]
+    return ts[0].get("category") or ""
+
+
 def _domain(host: str) -> str:
     return host if re.fullmatch(r"[\d.]+", host or "") else ".".join((host or "").split(".")[-2:])
 
@@ -95,10 +106,19 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
             "payload": payload,
             "rules": matched,
             "added_on": min(c["added_on"] for c in copies),
+            "category": release_category(orig, ts),
+            "last_search": None,
         })
     releases.sort(key=lambda r: r["name"].lower())
     _cache["by_key"] = {r["key"]: r for r in releases}
     return releases
+
+
+def attach_last_search(items: list, last: dict) -> None:
+    """last : {nom de searchee: date ISO}. Garde la recherche la plus récente parmi les copies."""
+    for r in items:
+        dates = [last[n] for c in r["copies"] for n in (c["name"], c["path"]) if n and n in last]
+        r["last_search"] = max(dates) if dates else None
 
 
 def get(key: str):

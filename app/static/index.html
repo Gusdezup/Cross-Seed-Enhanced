@@ -47,12 +47,11 @@
           <option value="noorig">Sans torrent d'origine</option>
         </select>
         <select id="rel-tracker" aria-label="Tracker"><option value="">Tous les trackers</option></select>
-        <select id="rel-sort" aria-label="Tri">
-          <option value="count">Moins cross-seedées d'abord</option>
-          <option value="name">Nom</option>
-          <option value="size">Taille</option>
-          <option value="added">Ajout récent</option>
-        </select>
+        <select id="rel-cat" aria-label="Catégorie"><option value="">Toutes les catégories</option></select>
+        <details class="colpick" id="rel-cols">
+          <summary class="ghost">Colonnes</summary>
+          <div class="colpick-menu" id="rel-cols-menu"></div>
+        </details>
         <button class="ghost" id="rel-refresh" title="Recharger depuis qBittorrent">Actualiser</button>
       </div>
       <div class="selbar" id="rel-selbar" hidden>
@@ -65,7 +64,13 @@
         <table class="rel">
           <thead><tr>
             <th class="c-check"><input type="checkbox" id="rel-all" aria-label="Tout sélectionner"></th>
-            <th>Release</th><th class="c-size">Taille</th><th>Copies</th><th class="c-act"></th>
+            <th data-sort="name">Release</th>
+            <th class="c-cat" data-sort="category">Catégorie</th>
+            <th class="c-size" data-sort="size">Taille</th>
+            <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
+            <th class="c-last" data-sort="last" title="Dernière recherche cross-seed, tous indexers confondus">Dernière recherche</th>
+            <th class="c-copies" data-sort="count" title="Copies dans qBittorrent ; tri par nombre de copies">Copies</th>
+            <th class="c-act"></th>
           </tr></thead>
           <tbody id="rel-body"></tbody>
         </table>

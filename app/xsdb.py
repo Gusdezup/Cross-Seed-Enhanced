@@ -135,6 +135,27 @@ def history(names: list) -> dict:
     return out
 
 
+def last_searched() -> dict:
+    """{nom de searchee: date ISO de la dernière recherche, tous indexers confondus}. {} si indisponible."""
+    try:
+        con = _connect()
+    except sqlite3.Error:
+        return {}
+    if not con:
+        return {}
+    try:
+        tcols, scols = _columns(con, "timestamp"), _columns(con, "searchee")
+        if not ({"searchee_id", "last_searched"} <= tcols and {"id", "name"} <= scols):
+            return {}
+        q = ("SELECT s.name AS name, MAX(t.last_searched) AS last "
+             "FROM timestamp t JOIN searchee s ON s.id = t.searchee_id GROUP BY s.name")
+        return {r["name"]: _ts(r["last"]) for r in con.execute(q) if r["last"]}
+    except sqlite3.Error:
+        return {}
+    finally:
+        con.close()
+
+
 # --- config.js (analyse textuelle, jamais exécutée) ---------------------------
 
 def _config_text() -> str:
