@@ -65,6 +65,10 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
     """site_names : {domaine: nom} venant de Prowlarr, utilisé quand aucun nom n'est saisi dans les réglages."""
     aliases = settings.get("tracker_aliases", {})
     site_names = site_names or {}
+    # Même site annonçant sur un autre domaine (ex. tk.v3x.tw pour v3x.club) : rattaché par le nom de base
+    by_base = {}
+    for dom, name in site_names.items():
+        by_base.setdefault(default_label(dom).lower(), name)
     rules = compile_rules(settings.get("rules", []))
     groups: dict = {}
     for t in torrents:
@@ -86,7 +90,8 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
                 "hash": t["hash"],
                 "name": t["name"],
                 "host": host,
-                "tracker": aliases.get(host) or site_names.get(_domain(host)) or default_label(host),
+                "tracker": (aliases.get(host) or site_names.get(_domain(host))
+                            or by_base.get(default_label(host).lower()) or default_label(host)),
                 "cross_seed": is_cross_seed(t),
                 "category": t.get("category") or "",
                 "state": t.get("state") or "",
