@@ -1,8 +1,8 @@
 # cross-seed enhanced
 
-Interface web pour piloter [cross-seed](https://www.cross-seed.org) v6 avec qBittorrent : rechercher un torrent précis, faire passer certaines releases en priorité, gérer les injections en échec, suspendre un indexer, régler cross-seed sans éditer `config.js` à la main.
+Interface web pour piloter [cross-seed](https://www.cross-seed.org) v6 ou v7 avec qBittorrent : rechercher un torrent précis, faire passer certaines releases en priorité et gérer les injections en échec. La gestion des indexers est compatible avec les deux versions.
 
-L'outil ne remplace pas cross-seed. Il utilise son API, lit ses logs et sa base en lecture seule, et ne modifie `config.js` qu'à ta demande, avec une sauvegarde à chaque fois.
+L'outil ne remplace pas cross-seed. Il utilise son API, lit ses logs et sa base en lecture seule. En v6 seulement, il peut modifier `config.js` à la demande, avec sauvegarde préalable.
 
 > Projet indépendant, sans lien avec l'équipe de cross-seed. Interface en français.
 
@@ -22,7 +22,7 @@ L'outil ne remplace pas cross-seed. Il utilise son API, lit ses logs et sa base 
 
 ## Prérequis
 
-- cross-seed **v6** (testé avec 6.13.7) en mode daemon, avec son API (`apiKey`, ou la clé affichée par `cross-seed api-key`)
+- cross-seed **v6** (testé avec 6.13.7) ou **v7** (testé avec 7.0.0-22) en mode daemon, avec son API (`apiKey`, ou la clé affichée par `cross-seed api-key`)
 - qBittorrent **5.2 ou plus récent**, avec une clé API WebUI (Options, WebUI)
 - Docker et Docker Compose
 
@@ -38,6 +38,12 @@ docker compose up -d
 ```
 
 Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, ainsi que `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
+
+### cross-seed v7
+
+Utilise `docker-compose.v7.yml` comme stack autonome (Dockge peut importer son contenu), avec `XS_VERSION=7` dans `.env` et le même `XS_CONFIG_PATH` que cross-seed. Le dossier de configuration est monté en lecture seule. Les indexers sont ajoutés, suspendus et retirés via `/api/indexer/v1` avec la clé API de cross-seed ; les modifications sont directes et ne demandent pas de redémarrage. Les réglages généraux restent à modifier dans l'interface native de cross-seed v7 : son API de réglages requiert une session utilisateur, pas la clé API. Le bouton de redémarrage n'est pas proposé par cette stack v7.
+
+Le mode v7 lit `cross-seed.db` et ses fichiers WAL pour l'historique. Il ne migre pas les données v6 et n'écrit jamais directement dans cette base. Le mode v6 et son `docker-compose.yml` restent inchangés.
 
 **Prowlarr et Jackett** (facultatifs, l'un, l'autre ou les deux) : ils permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à configurer si tes lignes `torznab` pointent déjà vers eux (`http://…:9696/<id>/api?apikey=…` pour Prowlarr, `http://…:9117/api/v2.0/indexers/<id>/results/torznab/api?apikey=…` pour Jackett) : l'adresse et la clé en sont déduites. Sinon, renseigne-les dans **Réglages › Sources d'indexers**, avec un bouton pour tester la connexion. L'adresse est écrite telle quelle dans `config.js` : elle doit être joignable par cross-seed comme par l'interface (par exemple `http://jackett:9117` si les trois conteneurs partagent un réseau Docker). Pour Jackett, seule la clé API est nécessaire, même avec un mot de passe admin. Un tracker déclaré à la fois dans Prowlarr et dans Jackett est signalé comme doublon. Les variables `PROWLARR_URL` / `PROWLARR_APIKEY` et `JACKETT_URL` / `JACKETT_APIKEY` du `.env` restent possibles et prioritaires sur les Réglages.
 
@@ -65,7 +71,7 @@ Pour faire tourner une seconde instance (par exemple construite depuis les sourc
 - Le schéma de `cross-seed.db` n'est pas documenté. Si une version de cross-seed le change, l'historique par indexer affichera « indisponible », le reste continuera de fonctionner.
 - Une recherche routée n'est pas enregistrée dans l'historique de recherche de cross-seed (`excludeRecentSearch` ne s'y applique pas) ; l'interface la note dans son propre historique, utilisé par la colonne « Dernière recherche » et par le scan planifié.
 - La suspension d'indexers suppose un tableau `torznab` avec une URL par ligne.
-- cross-seed v7 (en préversion) n'a pas été testé.
+- En v7, l'édition des réglages généraux se fait dans l'interface native de cross-seed.
 
 ## Licence
 

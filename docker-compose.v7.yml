@@ -1,0 +1,17 @@
+services:
+  cross-seed-enhanced:
+    image: ghcr.io/gusdezup/cross-seed-enhanced:latest
+    container_name: cross-seed-enhanced
+    restart: unless-stopped
+    ports:
+      - "${PORT:-2469}:2469"
+    env_file:
+      - .env
+    environment:
+      XS_VERSION: "7"
+    volumes:
+      # Base et logs cross-seed v7 : lecture seule. Aucune écriture SQLite directe.
+      - ${XS_CONFIG_PATH}:/cs-config:ro
+      # Gestion des injections en attente uniquement.
+      - ${XS_CONFIG_PATH}/cross-seeds:/cs-config/cross-seeds
+      - ./data:/data

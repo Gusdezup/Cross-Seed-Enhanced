@@ -10,6 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -65,8 +66,9 @@ async def status():
     except Exception as e:  # noqa: BLE001
         out["xs"]["error"] = str(e)[:200]
     out["restart_available"] = bool(config.DOCKER_URL) and not config.READONLY
+    out["xs_version"] = config.XS_VERSION
     out["readonly"] = config.READONLY
-    out["config_write"] = not config.READONLY or config.ALLOW_CONFIG_WRITE
+    out["config_write"] = config.XS_VERSION == "6" and (not config.READONLY or config.ALLOW_CONFIG_WRITE)
     out["files"] = {
         "config": config.XS_CONFIG_JS.exists(),
         "logs": config.LOGS_DIR.is_dir(),
@@ -320,6 +322,7 @@ async def run_job(name: str):
 @app.get("/api/indexers")
 async def indexers():
     data = await asyncio.to_thread(xsdb.indexers)
+    data["version"] = config.XS_VERSION
     data["settings"] = await asyncio.to_thread(xsdb.useful_settings)
     pauses = routing._load_pauses()   # pauses posées par XSE après un HTTP 429 (recherches routées)
     for it in data["items"]:
@@ -329,6 +332,33 @@ async def indexers():
     await prowlarr.enrich(data)
     await jackett.enrich(data)
     return jackett.link_sites(data)
+
+
+def _v7_indexer(url: str) -> dict:
+    parts = urlsplit(url)
+    key = parse_qs(parts.query).get("apikey", [""])[0]
+    if parts.scheme not in ("http", "https") or not parts.netloc or not key:
+        raise ValueError("URL Torznab ou clé API invalide")
+    return {"url": urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")),
+            "apikey": key, "enabled": True}
+
+
+async def _v7_add(url: str) -> dict:
+    candidate = _v7_indexer(url)
+    for item in await clients.xs_indexers_v7():
+        if item.get("url", "").rstrip("/") == candidate["url"].rstrip("/"):
+            if item.get("enabled"):
+                return {"changed": False}
+            return await clients.xs_indexer_v7("PUT", item["id"], {"id": item["id"], "enabled": True})
+    return await clients.xs_indexer_v7("POST", body=candidate)
+
+
+async def _v7_find(key: str) -> dict:
+    from .logs import normalize_url
+    for item in await clients.xs_indexers_v7():
+        if normalize_url(item.get("url", "")) == key:
+            return item
+    raise ValueError("Indexer absent de cross-seed v7")
 
 
 def _config_error(e: Exception) -> HTTPException:
@@ -346,12 +376,18 @@ async def indexer_add(body: dict):
             jid = str(body["jackett_id"])
             if not any(i["id"] == jid for i in await jackett.fetch()):
                 raise ValueError("Indexer introuvable dans Jackett")
-            return await asyncio.to_thread(lambda: xsdb.add_indexer(xsdb.jackett_torznab_url(jid)))
+            url = xsdb.jackett_torznab_url(jid)
+            if config.XS_VERSION == "7":
+                return await _v7_add(url)
+            return await asyncio.to_thread(xsdb.add_indexer, url)
         pid = int(body.get("prowlarr_id"))
         indexers, _ = await prowlarr.fetch()
         if not any(i["id"] == pid and i.get("protocol") == "torrent" for i in indexers):
             raise ValueError("Indexer torrent introuvable dans Prowlarr")
-        return await asyncio.to_thread(lambda: xsdb.add_indexer(xsdb.torznab_url(pid)))
+        url = xsdb.torznab_url(pid)
+        if config.XS_VERSION == "7":
+            return await _v7_add(url)
+        return await asyncio.to_thread(xsdb.add_indexer, url)
     except (TypeError, ValueError, OSError, RuntimeError) as e:
         raise _config_error(e) from e
 
@@ -361,6 +397,12 @@ async def indexer_remove(body: dict):
     """Supprime la ligne d'un indexer du tableau torznab de config.js."""
     _idx_cache["data"] = None
     try:
+        if config.XS_VERSION == "7":
+            item = await _v7_find(str(body.get("key", "")))
+            enabled = [i for i in await clients.xs_indexers_v7() if i.get("enabled")]
+            if item.get("enabled") and len(enabled) <= 1:
+                raise ValueError("Impossible de retirer le dernier indexer actif")
+            return await clients.xs_indexer_v7("DELETE", item["id"])
         return await asyncio.to_thread(xsdb.remove_indexer, str(body.get("key", "")))
     except (ValueError, OSError) as e:
         raise _config_error(e) from e
@@ -370,6 +412,14 @@ async def indexer_remove(body: dict):
 async def indexer_toggle(body: dict):
     _idx_cache["data"] = None
     try:
+        if config.XS_VERSION == "7":
+            item = await _v7_find(str(body.get("key", "")))
+            enable = bool(body.get("enable"))
+            if not enable:
+                enabled = [i for i in await clients.xs_indexers_v7() if i.get("enabled")]
+                if item.get("enabled") and len(enabled) <= 1:
+                    raise ValueError("Impossible de suspendre le dernier indexer actif")
+            return await clients.xs_indexer_v7("PUT", item["id"], {"id": item["id"], "enabled": enable})
         res = await asyncio.to_thread(xsdb.set_indexer, str(body.get("key", "")), bool(body.get("enable")))
     except PermissionError as e:
         raise HTTPException(403, "config.js est en lecture seule : vérifie le montage dans docker-compose.yml") from e
