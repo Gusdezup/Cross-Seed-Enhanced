@@ -310,3 +310,7 @@ tr.detail .mini th { font-size: 12px; padding: 3px 6px; border: 0; }
 .scan-xs { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; }
 .scan-xs .muted { margin: 6px 0 0; }
 .scan-xs button { margin-top: 8px; }
+
+/* résultat d'une recherche routée : une ligne, détail au survol */
+.res-line { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.res-meta { font-size: 11.5px; color: var(--muted); border-bottom: 1px dotted var(--muted); cursor: help; white-space: nowrap; }

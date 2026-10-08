@@ -396,16 +396,16 @@ function resultHtml(i) {
 }
 
 function routedResultHtml(r) {
-  const parts = [`<span class="tag" title="Recherche faite par l'interface sur ces seuls indexers (routage par catégorie)">via ${esc(r.routed.join(", "))}</span>`];
-  if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ` +
-    r.injected.map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" "));
-  if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection sur ${esc(r.failed.join(", "))}</span>`);
-  if (!r.injected.length && !r.failed.length) {
-    if (r.exists.length) parts.push(`<span class="res-none">déjà en seed sur ${esc([...new Set(r.exists)].join(", "))}</span>`);
-    else parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat(s), aucun ne correspond` : "Rien trouvé"}</span>`);
-  }
-  if (r.errors.length) parts.push(`<span class="res-bad" title="${esc(r.errors.join("\n"))}">${r.errors.length} erreur${r.errors.length > 1 ? "s" : ""} : ${esc(r.errors[0])}${r.errors.length > 1 ? "…" : ""}</span>`);
-  return parts.join(" ");
+  const chips = (list) => [...new Set(list)].map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" ");
+  const parts = [];
+  if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ${chips(r.injected)}`);
+  if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection :</span> ${chips(r.failed)}`);
+  if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
+  if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat${r.candidates > 1 ? "s" : ""} examiné${r.candidates > 1 ? "s" : ""}, aucun ne correspond` : "Rien trouvé"}</span>`);
+  const tip = `Recherche routée sur : ${r.routed.join(", ")}` + (r.errors.length ? `\n\nErreurs :\n${r.errors.join("\n")}` : "");
+  let meta = `${r.routed.length} indexer${r.routed.length > 1 ? "s" : ""}`;
+  if (r.errors.length) meta += ` · ⚠ ${r.errors.length}`;
+  return `<span class="res-line">${parts.join(" ")} <span class="res-meta" title="${esc(tip)}">${esc(meta)}</span></span>`;
 }
 
 async function loadQueue() {
