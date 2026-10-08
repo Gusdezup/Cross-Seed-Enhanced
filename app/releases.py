@@ -147,6 +147,8 @@ def attach_trackers(items: list, state: dict, indexers: dict, all_hashes: set, r
     seed      — une copie est dans qBittorrent ;
     available — cross-seed a trouvé une correspondance dont le torrent n'est pas dans qBittorrent ;
     nomatch   — cherchée sur ce tracker, sans correspondance utilisable ;
+    Les correspondances d'un tracker qui n'est plus un indexer de config.js (et sans copie dans
+    qBittorrent) sont ignorées : tracker mort ou retiré.
     never     — indexer actif dans config.js, jamais interrogé pour cette release.
     indexers : {id cross-seed: {"label", "active"}} ; state : xsdb.search_state()."""
     searches, decisions = state.get("searches", {}), state.get("decisions", {})
@@ -186,7 +188,12 @@ def attach_trackers(items: list, state: dict, indexers: dict, all_hashes: set, r
             for source, ih, dec, _seen in decisions.get(n, []):
                 if dec not in MATCHES:
                     continue
-                t = slot(label_of(source))
+                label = label_of(source)
+                if _key(label) not in known and _key(label) not in tr:
+                    # tracker qui n'est plus un indexer de config.js (mort, retiré) et sans copie
+                    # dans qBittorrent : cette ancienne correspondance ne permet plus rien
+                    continue
+                t = slot(label)
                 if ih and ih in all_hashes:
                     # torrent déjà présent : en seed (ou en cours) sur ce tracker
                     if t["state"] != "seed":

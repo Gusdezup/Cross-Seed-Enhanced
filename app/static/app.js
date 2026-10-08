@@ -195,6 +195,7 @@ function filteredReleases() {
     if (f === "single" && r.seeds !== 1) return false;
     if (f === "available" && !r.available) return false;
     if (f === "noorig" && r.has_original) return false;
+    if (f === "dup" && new Set(r.copies.map((c) => c.tracker)).size === r.copies.length) return false;
     if (tr && !r.copies.some((c) => c.tracker === tr)) return false;
     if (catOn && r.category !== cat) return false;
     if (terms.length) {
