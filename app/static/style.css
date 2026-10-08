@@ -303,3 +303,10 @@ tr.detail .mini th { font-size: 12px; padding: 3px 6px; border: 0; }
 .route-idx .off { color: var(--muted); font-style: italic; }
 .route .rule-info { grid-column: 1 / -1; }
 @media (max-width: 700px) { .route { grid-template-columns: 1fr auto; } .route-idx { grid-column: 1 / -1; } }
+
+/* --- scan planifié --- */
+.scan-form { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-end; margin-bottom: 8px; }
+.scan-form .check { align-self: center; }
+.scan-xs { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.scan-xs .muted { margin: 6px 0 0; }
+.scan-xs button { margin-top: 8px; }

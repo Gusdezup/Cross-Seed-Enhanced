@@ -161,9 +161,25 @@
       <button class="ghost" id="rule-add">Ajouter une règle</button>
 
       <h2>Routage par catégorie</h2>
-      <p class="muted">Pour une catégorie routée, chaque recherche de la file (bouton « Chercher » ou règle) n'interroge que les indexers cochés : l'interface les interroge elle-même, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Les autres catégories restent cherchées par cross-seed sur tous ses indexers. Le scan complet, le RSS et l'announce de cross-seed ne sont pas concernés. Une recherche routée n'apparaît pas dans la colonne « Dernière recherche ».</p>
+      <p class="muted">Pour une catégorie routée, chaque recherche de la file (bouton « Chercher » ou règle) n'interroge que les indexers cochés : l'interface les interroge elle-même, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Les autres catégories restent cherchées par cross-seed sur tous ses indexers. Le scan complet de cross-seed (sauf s'il est remplacé par le scan planifié ci-dessous), son RSS et son announce ne sont pas concernés. Une recherche routée n'entre pas dans l'historique de cross-seed : l'interface la note de son côté (colonne « Dernière recherche », scan planifié).</p>
       <div id="routes"></div>
       <button class="ghost" id="route-add">Ajouter un routage</button>
+
+      <h2>Scan planifié</h2>
+      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles des règles prioritaires d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Les catégories routées passent par leurs indexers. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
+      <div class="scan-form">
+        <label class="check"><input type="checkbox" id="scan-enabled"> Activer le scan planifié</label>
+        <label class="field">Toutes les<span><input type="number" id="scan-every" min="1" max="720"> heures</span></label>
+        <label class="field">Au plus<span><input type="number" id="scan-limit" min="0"> releases par passage (0 : sans limite)</span></label>
+        <label class="field">Sauter les releases cherchées depuis moins de<span><input type="number" id="scan-recent" min="0"> jours</span></label>
+      </div>
+      <p class="muted" id="scan-status"></p>
+      <div class="btns"><button class="ghost" id="scan-run">Lancer un passage maintenant</button></div>
+      <div class="scan-xs">
+        <label class="check"><input type="checkbox" id="scan-replace"> Remplacer le scan complet de cross-seed : <code>searchCadence: null</code> dans config.js (décocher rétablit l'ancienne valeur)</label>
+        <p class="muted" id="scan-xs-note"></p>
+        <button class="primary" id="scan-xs-restart" hidden>Redémarrer cross-seed pour appliquer</button>
+      </div>
 
       <h2>Rythme</h2>
       <label class="field">Délai entre deux recherches

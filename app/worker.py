@@ -6,7 +6,7 @@ import time
 
 import httpx
 
-from . import clients, config, logs, routing
+from . import clients, config, logs, routing, scan
 
 _ids = itertools.count(1)
 
@@ -161,6 +161,7 @@ class SearchQueue:
             item.update(status="error", error=str(e)[:300], done=time.time())
         else:
             item.update(status="done", result=res, done=time.time())
+            scan.record_routed(item["key"])
         self.last_sent = time.time()
         self.save()
 

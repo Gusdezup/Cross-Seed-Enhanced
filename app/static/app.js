@@ -89,6 +89,7 @@ async function loadHealth() {
     // Lecture seule (instance de dev) : bandeau + boutons neutralisés par CSS (body.ro, body.ro-cfg)
     state.readonly = !!s.readonly;
     const cfgWrite = s.config_write !== false;
+    state.configWrite = cfgWrite;
     document.body.classList.toggle("ro", state.readonly);
     document.body.classList.toggle("ro-cfg", !cfgWrite);
     const rb = $("#ro-banner");
@@ -850,6 +851,73 @@ $("#route-add").addEventListener("click", () => {
   $('#routes .route:last-of-type [data-f="category"]').focus();
 });
 
+// ---------- scan planifié ----------
+function scanForm() {
+  return { enabled: $("#scan-enabled").checked, every_hours: +$("#scan-every").value,
+    limit: +$("#scan-limit").value, recent_days: +$("#scan-recent").value };
+}
+const fmtWhen = (sec) => new Date(sec * 1000).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function scanStatusText(info) {
+  const s = info.state || {}, sc = state.settings.scan, parts = [];
+  if (s.last_run) {
+    const how = s.last_trigger === "manuel" ? "lancé à la main" : "automatique";
+    if (s.last_error) parts.push(`Dernier passage (${how}) le ${fmtWhen(s.last_run)} : erreur, ${s.last_error}.`);
+    else parts.push(`Dernier passage (${how}) le ${fmtWhen(s.last_run)} : ${s.last_added} release(s) mise(s) en file sur ${s.last_eligible} éligible(s), ${s.last_recent} sautée(s) car cherchée(s) récemment.`);
+  } else parts.push("Aucun passage pour l'instant.");
+  if (info.readonly) parts.push("Lecture seule : le scan automatique ne se lance pas.");
+  else if (!sc.enabled) parts.push("Scan automatique désactivé.");
+  else if (info.next_run) parts.push(info.next_run * 1000 <= Date.now() ? "Prochain passage : dans la minute." : `Prochain passage : ${fmtWhen(info.next_run)}.`);
+  return parts.join(" ");
+}
+function scanXsNote(info, pendingRestart) {
+  const x = info.xs_cadence;
+  $("#scan-replace").disabled = !x || state.configWrite === false;
+  if (!x) return "searchCadence introuvable dans config.js : à modifier à la main.";
+  $("#scan-replace").checked = x.disabled;
+  const now = x.disabled ? "Dans config.js : searchCadence: null, le scan complet de cross-seed est coupé."
+    : `Dans config.js : searchCadence = ${x.value}, cross-seed fait son propre scan complet en plus de celui-ci.`;
+  return pendingRestart ? `${now} Redémarrage de cross-seed nécessaire pour l'appliquer.` : now;
+}
+async function renderScan() {
+  const sc = state.settings.scan;
+  $("#scan-enabled").checked = sc.enabled;
+  $("#scan-every").value = sc.every_hours;
+  $("#scan-limit").value = sc.limit;
+  $("#scan-recent").value = sc.recent_days;
+  try {
+    const info = await api("/api/scan");
+    $("#scan-status").textContent = scanStatusText(info);
+    $("#scan-xs-note").textContent = scanXsNote(info, !$("#scan-xs-restart").hidden);
+  } catch (err) { $("#scan-status").textContent = err.message; }
+}
+["#scan-enabled", "#scan-every", "#scan-limit", "#scan-recent"].forEach((s) =>
+  $(s).addEventListener("input", () => { state.settingsDirty = true; }));
+$("#scan-run").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  if (state.settingsDirty && !(await saveSettings())) { e.target.disabled = false; return; }
+  try {
+    const info = await api("/api/scan/run", { method: "POST" });
+    toast(`${info.state.last_added} release(s) mise(s) en file`);
+    $("#scan-status").textContent = scanStatusText(info);
+    loadQueue();
+  } catch (err) { toast(err.message, true); }
+  e.target.disabled = false;
+});
+$("#scan-replace").addEventListener("change", async (e) => {
+  const replace = e.target.checked;
+  const msg = replace ? "Couper le scan complet de cross-seed (searchCadence: null dans config.js) ?\n\nUne sauvegarde de config.js est faite. Le RSS et l'announce ne changent pas."
+    : "Rétablir le scan complet de cross-seed (ancienne valeur de searchCadence) ?";
+  if (!confirm(msg)) { e.target.checked = !replace; return; }
+  try {
+    const r = await api("/api/scan/replace", { method: "POST", body: { replace } });
+    if (r.changed) { $("#scan-xs-restart").hidden = !state.restartAvailable; toast(`config.js modifié (sauvegarde : ${r.backup})`); }
+    $("#scan-xs-note").textContent = scanXsNote(r, r.changed);
+  } catch (err) { e.target.checked = !replace; toast(err.message, true); }
+});
+$("#scan-xs-restart").addEventListener("click", async (e) => {
+  if (await restartXs(e.target)) { e.target.hidden = true; renderScan(); }
+});
+
 function renderAliases() {
   const aliases = state.settings.tracker_aliases || {};
   const hosts = Object.keys(state.trackers).filter(Boolean).sort();
@@ -863,6 +931,7 @@ async function renderSettings() {
   $("#set-delay").value = state.settings.delay;
   renderRules();
   renderRoutes();
+  renderScan();
   renderAliases();
   renderSources();
   renderXsForm();
@@ -1059,7 +1128,7 @@ async function saveSettings() {
   try {
     state.settings = await api("/api/settings", {
       method: "PUT",
-      body: { delay: +$("#set-delay").value, rules: state.settings.rules, routes: state.settings.routes, tracker_aliases: aliases },
+      body: { delay: +$("#set-delay").value, rules: state.settings.rules, routes: state.settings.routes, scan: scanForm(), tracker_aliases: aliases },
     });
     state.settingsDirty = false;
     toast("Réglages enregistrés");

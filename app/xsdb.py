@@ -432,8 +432,13 @@ def useful_settings() -> dict:
     return out
 
 
+NULLABLE_KEYS = ("searchCadence", "rssCadence")   # vide = null : fonction désactivée dans cross-seed
+
+
 def _literal(new: str, kind: str, key: str) -> str:
     new = str(new).strip()
+    if key in NULLABLE_KEYS and new == "":
+        return "null"
     if kind == "boolean":
         if new not in ("true", "false"):
             raise ValueError(f"{key} : true ou false attendu")

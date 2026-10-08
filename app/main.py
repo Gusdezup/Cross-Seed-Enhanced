@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, jackett, logs, prowlarr, releases, xsdb
+from . import clients, config, jackett, logs, prowlarr, releases, scan, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -24,9 +24,10 @@ JOBS = ("rss", "search", "inject", "cleanup")
 
 @asynccontextmanager
 async def lifespan(_app):
-    task = asyncio.create_task(queue.run())
+    tasks = [asyncio.create_task(queue.run()), asyncio.create_task(_scan_loop())]
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="cross-seed-enhanced", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -93,6 +94,7 @@ async def list_releases(refresh: bool = False):
         all_hashes = {t["hash"].lower() for t in torrents}
     state = await asyncio.to_thread(xsdb.search_state)
     releases.attach_trackers(items, state, await _indexer_labels(resolve), all_hashes, resolve)
+    scan.merge_last_search(items)
     trackers = {}
     for r in items:
         for c in r["copies"]:
@@ -155,6 +157,79 @@ async def queue_rules(body: dict | None = None):
     cands.sort(key=lambda r: (min(order.get(n, 99) for n in r["rules"]), r["count"], r["name"].lower()))
     added = sum(1 for r in cands if queue.add(r, source=only or r["rules"][0]))
     return {"added": added, "matched": len(cands)}
+
+
+# --- scan planifié -----------------------------------------------------------
+
+async def _run_scan(trigger: str) -> dict:
+    data = await list_releases(refresh=True)
+    settings = config.load_settings()
+    todo, eligible, recent = scan.candidates(data["releases"], settings)
+    added = sum(1 for r in todo if queue.add(r, source="scan"))
+    return scan.save_state(last_run=time.time(), last_trigger=trigger, last_added=added,
+                           last_selected=len(todo), last_eligible=eligible, last_recent=recent, last_error=None)
+
+
+async def _scan_loop():
+    """Lance le scan planifié à son heure (jamais en lecture seule)."""
+    while True:
+        await asyncio.sleep(60)
+        if config.READONLY:
+            continue
+        try:
+            if scan.due(config.load_settings()):
+                await _run_scan("auto")
+        except Exception as e:  # noqa: BLE001
+            scan.save_state(last_run=time.time(), last_trigger="auto", last_error=str(e)[:300])
+
+
+def _scan_info() -> dict:
+    settings = config.load_settings()
+    state = scan.load_state()
+    xs = xsdb.useful_settings().get("searchCadence")
+    return {"state": state, "next_run": scan.next_run(settings, state), "readonly": config.READONLY,
+            "xs_cadence": None if xs is None else {"value": xs["value"], "disabled": xs["kind"] == "empty"}}
+
+
+@app.get("/api/scan")
+async def get_scan():
+    return await asyncio.to_thread(_scan_info)
+
+
+@app.post("/api/scan/run")
+async def scan_run():
+    try:
+        await _run_scan("manuel")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, str(e)) from e
+    return await asyncio.to_thread(_scan_info)
+
+
+@app.post("/api/scan/replace")
+async def scan_replace(body: dict):
+    """Coupe (searchCadence: null) ou rétablit le scan complet de cross-seed dans config.js."""
+    replace = bool(body.get("replace"))
+    cur = await asyncio.to_thread(lambda: xsdb.useful_settings().get("searchCadence"))
+    if cur is None:
+        raise HTTPException(400, "searchCadence introuvable dans config.js : modifie-le à la main")
+    try:
+        if replace:
+            if cur["kind"] == "empty":
+                return {**await asyncio.to_thread(_scan_info), "changed": False}
+            res = await asyncio.to_thread(xsdb.update_settings, {"searchCadence": ""})
+            scan.save_state(xs_cadence_before=cur["value"])
+        else:
+            if cur["kind"] != "empty":
+                return {**await asyncio.to_thread(_scan_info), "changed": False}
+            before = scan.load_state().get("xs_cadence_before") or "1 day"
+            res = await asyncio.to_thread(xsdb.update_settings, {"searchCadence": before})
+    except PermissionError as e:
+        raise HTTPException(403, "config.js est en lecture seule : vérifie le montage dans docker-compose.yml") from e
+    except (ValueError, OSError) as e:
+        raise HTTPException(400, str(e)) from e
+    return {**await asyncio.to_thread(_scan_info), **res}
 
 
 @app.get("/api/queue")

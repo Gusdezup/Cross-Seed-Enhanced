@@ -45,6 +45,8 @@ DEFAULT_SETTINGS = {
     "tracker_aliases": {},
     # Routage : [{"category": "radarr", "indexers": [clé d'indexer, …]}] (clé = URL Torznab normalisée)
     "routes": [],
+    # Scan planifié par XSE (remplace ou complète le scan complet de cross-seed)
+    "scan": {"enabled": False, "every_hours": 24, "limit": 400, "recent_days": 7},
     # Sources d'indexers saisies dans l'interface (le .env reste prioritaire)
     "sources": {"prowlarr": {"url": "", "apikey": ""}, "jackett": {"url": "", "apikey": ""}},
 }
@@ -116,6 +118,7 @@ def load_settings() -> dict:
     merged["rules"] = [{k: v for k, v in _upgrade(r).items() if k != "name"} for r in merged["rules"]]
     src = data.get("sources") if isinstance(data.get("sources"), dict) else {}
     merged["routes"] = clean_routes(merged.get("routes"))
+    merged["scan"] = clean_scan(merged.get("scan"))
     merged["sources"] = {n: {"url": str((src.get(n) or {}).get("url", "")),
                              "apikey": str((src.get(n) or {}).get("apikey", ""))} for n in SOURCES}
     return merged
@@ -134,6 +137,22 @@ def clean_routes(routes) -> list:
         idx = [str(k).strip() for k in r.get("indexers") or [] if str(k).strip()]
         out.append({"category": cat, "indexers": list(dict.fromkeys(idx))})
     return out
+
+
+def _bounded(v, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def clean_scan(scan) -> dict:
+    d = DEFAULT_SETTINGS["scan"]
+    scan = scan if isinstance(scan, dict) else {}
+    return {"enabled": bool(scan.get("enabled", d["enabled"])),
+            "every_hours": _bounded(scan.get("every_hours"), d["every_hours"], 1, 24 * 30),
+            "limit": _bounded(scan.get("limit"), d["limit"], 0, 100000),   # 0 : pas de plafond
+            "recent_days": _bounded(scan.get("recent_days"), d["recent_days"], 0, 3650)}
 
 
 def public_settings(s: dict) -> dict:
@@ -188,6 +207,8 @@ def save_settings(data: dict) -> dict:
                 clean["sources"][n] = _clean_source(data["sources"][n], clean["sources"][n])
     if "routes" in data:
         clean["routes"] = clean_routes(data["routes"])
+    if "scan" in data:
+        clean["scan"] = clean_scan({**clean["scan"], **(data["scan"] if isinstance(data["scan"], dict) else {})})
     if "tracker_aliases" in data:
         clean["tracker_aliases"] = {str(k): str(v).strip()
                                     for k, v in data["tracker_aliases"].items() if str(v).strip()}

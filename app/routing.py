@@ -7,7 +7,7 @@ Pour une release dont la catégorie a une route, XSE interroge donc lui-même le
 fichiers) et injecte comme pour n'importe quelle correspondance.
 
 Limite : une recherche routée n'est pas enregistrée dans l'historique de recherche de cross-seed
-(colonne « Dernière recherche », excludeRecentSearch).
+(excludeRecentSearch) ; XSE la note dans son propre historique (scan.record_routed).
 """
 import asyncio
 import re
