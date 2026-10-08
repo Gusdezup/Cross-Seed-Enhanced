@@ -86,6 +86,8 @@ async function loadHealth() {
   try {
     const s = await api("/api/status");
     state.restartAvailable = !!s.restart_available;
+    state.xsVersion = s.xs_version || "6";
+    document.body.classList.toggle("xs-v7", state.xsVersion === "7");
     // Lecture seule (instance de dev) : bandeau + boutons neutralisés par CSS (body.ro, body.ro-cfg)
     state.readonly = !!s.readonly;
     const cfgWrite = s.config_write !== false;
@@ -532,10 +534,16 @@ function parseLogDate(s) { return s ? new Date(s.replace(" ", "T")) : null; }
 let idxData = null;
 async function loadIndexers() {
   try { idxData = await api("/api/indexers"); } catch (err) { $("#idx-list").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+  state.xsVersion = idxData.version || state.xsVersion || "6";
   renderIndexers();
 }
 function renderIndexers() {
   const d = idxData, now = new Date(), showRetired = $("#idx-retired").checked;
+  const v7 = state.xsVersion === "7";
+  $("#idx-retired").closest("label").hidden = v7;
+  $("#idx-intro").textContent = v7
+    ? "Les indexers cross-seed v7 sont gérés par son API. Ajouter, suspendre et retirer s'appliquent directement."
+    : "« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.";
   let paused = 0, needRestart = false;
   const retired = d.items.filter((i) => !i.active && i.config == null).length;
   $("#idx-retired-lbl").textContent = `Afficher les indexers retirés (${retired})`;
@@ -547,7 +555,11 @@ function renderIndexers() {
       .filter((x) => x && x > now).sort((a, b) => b - a)[0];
     let cls = "", line, pending = "", btn = "";
     const rm = i.config ? `<button class="small ghost danger" data-remove="${esc(i.key)}">Retirer</button>` : "";
-    if (i.config == null && i.active && i.id != null) {
+    if (v7) {
+      if (!i.active) { cls = "suspended"; line = "Désactivé"; btn = `<button class="small" data-toggle="${esc(i.key)}" data-enable="1">Réactiver</button>`; }
+      else if (until) { cls = "paused"; paused++; line = `En pause jusqu'au ${fmt(until)}`; btn = `<button class="small ghost" data-toggle="${esc(i.key)}" data-enable="0">Suspendre</button>`; }
+      else { line = i.status ? "Disponible" : "Statut inconnu"; btn = `<button class="small ghost" data-toggle="${esc(i.key)}" data-enable="0">Suspendre</button>`; }
+    } else if (i.config == null && i.active && i.id != null) {
       cls = "down"; line = "Retiré de config.js";
       pending = "Redémarrage de cross-seed nécessaire"; needRestart = true;
     } else if (i.config === "suspended") {
@@ -596,7 +608,7 @@ function renderIndexers() {
     (jkHtml ? `<h3>Disponibles dans Jackett</h3>${jkHtml}` : "");
   // Toujours disponible ; mis en avant seulement quand une modification attend un redémarrage.
   const rb = $("#idx-restart");
-  rb.hidden = !state.restartAvailable;
+  rb.hidden = !state.restartAvailable || v7;
   rb.className = needRestart ? "primary" : "ghost";
   rb.textContent = needRestart ? "Redémarrer cross-seed pour appliquer" : "Redémarrer cross-seed";
   const cnt = $("#cnt-indexers");
@@ -620,13 +632,13 @@ $("#idx-list").addEventListener("click", async (e) => {
   const add = e.target.closest("[data-add], [data-add-jackett]"), rem = e.target.closest("[data-remove]");
   if (add || rem) {
     const btn = add || rem, name = btn.closest(".card").querySelector(".name").textContent;
-    if (rem && !confirm(`Retirer ${name} de cross-seed ?\n\nSa ligne sera supprimée de config.js (sauvegarde faite avant). Tu pourras le rajouter depuis la liste Prowlarr ou Jackett.`)) return;
+    if (rem && !confirm(state.xsVersion === "7" ? `Retirer ${name} de cross-seed v7 ?` : `Retirer ${name} de cross-seed ?\n\nSa ligne sera supprimée de config.js (sauvegarde faite avant). Tu pourras le rajouter depuis la liste Prowlarr ou Jackett.`)) return;
     btn.disabled = true;
     try {
       if (add) await api("/api/indexers/add", { method: "POST", body: add.dataset.addJackett
         ? { jackett_id: add.dataset.addJackett } : { prowlarr_id: +add.dataset.add } });
       else await api("/api/indexers/remove", { method: "POST", body: { key: rem.dataset.remove } });
-      toast(`${name} ${add ? "ajouté à" : "retiré de"} config.js. Redémarre cross-seed pour appliquer.`);
+      toast(state.xsVersion === "7" ? `${name} ${add ? "ajouté" : "retiré"} dans cross-seed v7.` : `${name} ${add ? "ajouté à" : "retiré de"} config.js. Redémarre cross-seed pour appliquer.`);
       loadIndexers();
     } catch (err) { toast(err.message, true); btn.disabled = false; }
     return;
@@ -635,11 +647,11 @@ $("#idx-list").addEventListener("click", async (e) => {
   if (!b) return;
   const enable = b.dataset.enable === "1";
   const card = b.closest(".card"), name = card.querySelector(".name").textContent;
-  if (!enable && !confirm(`Suspendre ${name} ?\n\nSa ligne sera mise en commentaire dans config.js (sauvegarde faite avant). cross-seed ne le contactera plus après redémarrage.`)) return;
+  if (!enable && !confirm(state.xsVersion === "7" ? `Suspendre ${name} dans cross-seed v7 ?` : `Suspendre ${name} ?\n\nSa ligne sera mise en commentaire dans config.js (sauvegarde faite avant). cross-seed ne le contactera plus après redémarrage.`)) return;
   b.disabled = true;
   try {
     await api("/api/indexers/toggle", { method: "POST", body: { key: b.dataset.toggle, enable } });
-    toast(`${name} ${enable ? "réactivé" : "suspendu"} dans config.js. Redémarre cross-seed pour appliquer.`);
+    toast(state.xsVersion === "7" ? `${name} ${enable ? "réactivé" : "suspendu"} dans cross-seed v7.` : `${name} ${enable ? "réactivé" : "suspendu"} dans config.js. Redémarre cross-seed pour appliquer.`);
     loadIndexers();
   } catch (err) { toast(err.message, true); b.disabled = false; }
 });
@@ -961,6 +973,7 @@ const SRC_ORIGIN = { ".env": "via .env", "config.js": "via config.js", "Réglage
 async function renderSources(info) {
   try { info = info || await api("/api/sources"); }
   catch (err) { $("#sources").innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  if (state.xsVersion === "7") $("#src-intro").textContent = "Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed v7 depuis l'onglet Indexers. Leur adresse et leur clé peuvent être déduites des indexers déjà enregistrés, ou renseignées ici. Une valeur du .env reste prioritaire.";
   $("#sources").innerHTML = Object.entries(SRC_META).map(([n, m]) => {
     const s = info[n], eff = s.effective, fromJs = eff && eff.origin === "config.js";
     let status;
@@ -1043,6 +1056,16 @@ const XS_ENUMS = {
 };
 let xsSettings = null;
 async function renderXsForm() {
+  if (!state.xsVersion) state.xsVersion = (await api("/api/status")).xs_version || "6";
+  if (state.xsVersion === "7") {
+    $("#xs-intro").textContent = "Réglages généraux de cross-seed v7.";
+    $("#xs-duration-intro").hidden = true;
+    $("#xs-form").innerHTML = `<p class="muted">Les réglages cross-seed v7 se modifient dans son interface native. Les règles prioritaires et les sources d'indexers restent disponibles ici.</p>`;
+    $("#xs-save").hidden = true;
+    $("#xs-restart").hidden = true;
+    $("#xs-note").textContent = "";
+    return;
+  }
   try {
     const d = await api("/api/indexers");
     xsSettings = d.settings || {};
