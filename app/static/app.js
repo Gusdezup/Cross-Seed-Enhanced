@@ -433,7 +433,7 @@ async function loadQueue() {
       <td>${i.source === "manuel" ? "manuel" : `<span class="tag rule">${esc(i.source)}</span>`}</td>
       <td>${resultHtml(i)}</td>
       <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
-    </tr>`).join("") : `<tr><td colspan="5" class="empty">Rien dans la file. Lance les règles prioritaires ou clique « Chercher » sur une release.</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">Rien dans la file. Clique « Chercher » sur une release, ou ajoute les releases d'une règle prioritaire avec « Ajouter à la file ».</td></tr>`;
 }
 
 $("#q-body").addEventListener("click", async (e) => {
@@ -447,8 +447,8 @@ async function renderQueueRules() {
   if (!state.settings) { try { state.settings = await api("/api/settings"); } catch { return; } }
   const sel = $("#q-rule"), cur = sel.value;
   const labels = [...new Set(state.settings.rules.filter((r) => r.enabled).map(ruleLabel))];
-  const html = `<option value="">Toutes les règles</option>` +
-    labels.map((l) => `<option value="${esc(l)}"${l === cur ? " selected" : ""}>${esc(l)}</option>`).join("");
+  const html = `<option value="">Règle : toutes</option>` +
+    labels.map((l) => `<option value="${esc(l)}"${l === cur ? " selected" : ""}>Règle : ${esc(l)}</option>`).join("");
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
 }
 $("#q-rules").addEventListener("click", async (e) => {
@@ -457,6 +457,11 @@ $("#q-rules").addEventListener("click", async (e) => {
   if (state.settingsDirty && !(await saveSettings())) { e.target.disabled = false; return; }
   const rule = $("#q-rule").value;
   try {
+    const dry = await api("/api/queue/rules", { method: "POST", body: { ...(rule ? { rule } : {}), dry: true } });
+    if (dry.matched > 20 && !confirm(`${dry.matched} releases correspondent ${rule ? `à « ${rule} »` : "aux règles prioritaires"}.\n\nLes ajouter à la file ? À une recherche toutes les ${state.queue ? state.queue.delay : "?"} s, il faudra environ ${fmtDuration(dry.matched * (state.queue ? state.queue.delay : 60))}.`)) {
+      e.target.disabled = false;
+      return;
+    }
     const r = await api("/api/queue/rules", { method: "POST", body: rule ? { rule } : {} });
     const what = rule ? `« ${rule} »` : "aux règles";
     toast(r.matched ? `${r.added} release(s) ajoutée(s) à la file (${r.matched} correspondent ${rule ? "à " : ""}${what})` : `Aucune release ne correspond ${rule ? "à " : ""}${what}`);

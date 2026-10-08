@@ -155,6 +155,8 @@ async def queue_rules(body: dict | None = None):
     order = {config.rule_label(r): n for n, r in enumerate(settings["rules"])}
     cands = [r for r in data["releases"] if r["rules"] and (not only or only in r["rules"])]
     cands.sort(key=lambda r: (min(order.get(n, 99) for n in r["rules"]), r["count"], r["name"].lower()))
+    if (body or {}).get("dry"):   # simple comptage, pour demander confirmation avant un gros ajout
+        return {"added": 0, "matched": len(cands)}
     added = sum(1 for r in cands if queue.add(r, source=only or r["rules"][0]))
     return {"added": added, "matched": len(cands)}
 
