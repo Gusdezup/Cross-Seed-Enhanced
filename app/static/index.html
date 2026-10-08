@@ -95,7 +95,8 @@
           <p class="muted" id="q-state"></p>
         </div>
         <div class="btns">
-          <button class="primary" id="q-rules">Lancer les règles prioritaires</button>
+          <select id="q-rule" aria-label="Règle à lancer"><option value="">Toutes les règles</option></select>
+          <button class="primary" id="q-rules">Lancer</button>
           <button class="ghost" id="q-pause">Pause</button>
           <button class="ghost" id="q-clear-pending">Vider la file</button>
           <button class="ghost" id="q-clear-done">Effacer l'historique</button>
@@ -155,7 +156,7 @@
     <!-- SETTINGS -->
     <section id="tab-settings" class="tab" hidden>
       <h2>Règles prioritaires</h2>
-      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
+      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active, ou, pour une règle « Catégorie », si elle est dans cette catégorie qBittorrent (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
       <div id="rules"></div>
       <button class="ghost" id="rule-add">Ajouter une règle</button>
 

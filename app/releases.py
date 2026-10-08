@@ -35,12 +35,13 @@ def default_label(host: str) -> str:
 
 
 def compile_rules(rules: list) -> list:
+    """[(étiquette, expression, porte sur la catégorie ?)] des règles actives."""
     out = []
     for r in rules:
         if not r.get("enabled", True):
             continue
         try:
-            out.append((config.rule_label(r), re.compile(r["pattern"], re.I)))
+            out.append((config.rule_label(r), re.compile(r["pattern"], re.I), r.get("type") == "category"))
         except re.error:
             pass
     return out
@@ -109,7 +110,9 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
                 "added_on": t.get("added_on") or 0,
             })
         copies.sort(key=lambda c: (c["cross_seed"], c["added_on"]))
-        matched = [name for name, rx in rules if any(rx.search(t["name"]) for t in ts)]
+        category = release_category(orig, ts)
+        matched = [name for name, rx, on_cat in rules
+                   if (rx.search(category) if on_cat else any(rx.search(t["name"]) for t in ts))]
         releases.append({
             "key": key,
             "name": ref["name"],
@@ -121,7 +124,7 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
             "payload": payload,
             "rules": matched,
             "added_on": min(c["added_on"] for c in copies),
-            "category": release_category(orig, ts),
+            "category": category,
             "last_search": None,
             "trackers": [],
             "seeds": len({c["tracker"] for c in copies}),

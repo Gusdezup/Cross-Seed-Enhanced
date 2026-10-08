@@ -50,16 +50,25 @@ SOURCES = ("prowlarr", "jackett")
 
 _lock = threading.Lock()
 
-RULE_TYPES = ("group", "contains", "starts", "regex")
+RULE_TYPES = ("group", "contains", "starts", "category", "regex")
 
 
 def _words(value: str) -> list:
     return [w.lstrip("-") for w in re.split(r"[\s,;]+", value.strip()) if w.lstrip("-")]
 
 
+def categories(value: str) -> list:
+    """Catégories d'une règle « Catégorie », séparées par des virgules (une catégorie peut contenir des espaces)."""
+    return [c.strip() for c in str(value or "").split(",") if c.strip()]
+
+
 def rule_pattern(rule: dict) -> str:
-    """Construit l'expression régulière à partir d'une règle « humaine »."""
+    """Construit l'expression régulière à partir d'une règle « humaine ».
+    Pour une règle « Catégorie », l'expression porte sur la catégorie de la release, pas sur son nom."""
     t, v = rule.get("type", "regex"), str(rule.get("value", ""))
+    if t == "category":
+        cats = categories(v)
+        return f"^(?:{'|'.join(re.escape(c) for c in cats)})$" if cats else ""
     if t == "group":
         groups = _words(v)
         return f"-(?:{'|'.join(re.escape(g) for g in groups)})(\\.\\w{{2,4}})?$" if groups else ""
@@ -71,8 +80,12 @@ def rule_pattern(rule: dict) -> str:
 
 
 def rule_label(rule: dict) -> str:
-    """Étiquette d'une règle : sa valeur (plus de nom séparé, source de confusion)."""
-    return str(rule.get("value") or "").strip() or "Règle"
+    """Étiquette d'une règle : sa valeur (plus de nom séparé, source de confusion).
+    Préfixée pour une règle « Catégorie », pour ne pas la confondre avec un groupe de même nom."""
+    value = str(rule.get("value") or "").strip()
+    if rule.get("type") == "category":
+        return f"Catégorie {', '.join(categories(value))}" if value else "Catégorie"
+    return value or "Règle"
 
 
 def _upgrade(rule: dict) -> dict:

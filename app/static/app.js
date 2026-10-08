@@ -401,6 +401,7 @@ async function loadQueue() {
   cnt.classList.toggle("hot", q.pending > 0);
   if (state.tab !== "queue") return;
   $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
+  renderQueueRules();
   let st;
   if (state.readonly) st = `Lecture seule : la file ne part pas, ${q.pending} recherche(s) en attente.`;
   else if (q.paused) st = `En pause, ${q.pending} recherche(s) en attente.`;
@@ -426,13 +427,24 @@ $("#q-body").addEventListener("click", async (e) => {
   await api(`/api/queue/${b.dataset.rm}`, { method: "DELETE" });
   loadQueue();
 });
+// Liste des règles actives à côté du bouton : toutes, ou une seule (ex. une règle « Catégorie radarr »)
+async function renderQueueRules() {
+  if (!state.settings) { try { state.settings = await api("/api/settings"); } catch { return; } }
+  const sel = $("#q-rule"), cur = sel.value;
+  const labels = [...new Set(state.settings.rules.filter((r) => r.enabled).map(ruleLabel))];
+  const html = `<option value="">Toutes les règles</option>` +
+    labels.map((l) => `<option value="${esc(l)}"${l === cur ? " selected" : ""}>${esc(l)}</option>`).join("");
+  if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
+}
 $("#q-rules").addEventListener("click", async (e) => {
   e.target.disabled = true;
   // règles modifiées mais pas enregistrées : on enregistre d'abord, sinon le serveur lance les anciennes
   if (state.settingsDirty && !(await saveSettings())) { e.target.disabled = false; return; }
+  const rule = $("#q-rule").value;
   try {
-    const r = await api("/api/queue/rules", { method: "POST", body: {} });
-    toast(r.matched ? `${r.added} release(s) prioritaire(s) ajoutée(s) à la file (${r.matched} correspondent aux règles)` : "Aucune release ne correspond aux règles");
+    const r = await api("/api/queue/rules", { method: "POST", body: rule ? { rule } : {} });
+    const what = rule ? `« ${rule} »` : "aux règles";
+    toast(r.matched ? `${r.added} release(s) ajoutée(s) à la file (${r.matched} correspondent ${rule ? "à " : ""}${what})` : `Aucune release ne correspond ${rule ? "à " : ""}${what}`);
     loadQueue();
   } catch (err) { toast(err.message, true); }
   e.target.disabled = false;
@@ -704,8 +716,10 @@ $("#log-clear").addEventListener("click", () => { logState.entries = []; renderL
 // ---------- réglages ----------
 const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const ruleWords = (v) => String(v || "").trim().split(/[\s,;]+/).map((w) => w.replace(/^-+/, "")).filter(Boolean);
+const ruleCats = (v) => String(v || "").split(",").map((c) => c.trim()).filter(Boolean);
 function rulePattern(r) {
   const v = String(r.value || "");
+  if (r.type === "category") { const c = ruleCats(v); return c.length ? `^(?:${c.map(escRe).join("|")})$` : ""; }
   if (r.type === "group") { const g = ruleWords(v); return g.length ? `-(?:${g.map(escRe).join("|")})(\\.\\w{2,4})?$` : ""; }
   if (r.type === "contains") return ruleWords(v).map((w) => `(?=.*${escRe(w)})`).join("");
   if (r.type === "starts") return v.trim() ? `^${escRe(v.trim())}` : "";
@@ -718,6 +732,8 @@ const RULE_TYPES = {
     hint: "Tous les mots doivent apparaître dans le nom, dans n'importe quel ordre." },
   starts: { label: "Commence par", ph: "ex. Star.Wars",
     hint: "Le nom commence exactement par ce texte (points compris)." },
+  category: { label: "Catégorie", ph: "ex. radarr (plusieurs : radarr, sonarr)",
+    hint: "La release est dans cette catégorie qBittorrent (celle du torrent d'origine). Plusieurs catégories séparées par une virgule." },
   regex: { label: "Expression régulière", ph: "pour les utilisateurs avancés",
     hint: "Expression régulière Python, insensible à la casse." },
 };
@@ -726,8 +742,15 @@ function ruleMatches(r) {
   if (!pat) return { n: 0, ex: [], empty: true };
   let rx;
   try { rx = new RegExp(pat, "i"); } catch { return null; }
-  const hits = state.releases.filter((rel) => rel.copies.some((c) => rx.test(c.name)));
+  const hits = state.releases.filter((rel) => (r.type === "category" ? rx.test(rel.category || "")
+    : rel.copies.some((c) => rx.test(c.name))));
   return { n: hits.length, ex: hits.slice(0, 3).map((h) => h.name) };
+}
+// Même étiquette que config.rule_label côté serveur (colonne Priorité, origine dans la file)
+function ruleLabel(r) {
+  const v = String(r.value || "").trim();
+  if (r.type === "category") return v ? `Catégorie ${ruleCats(v).join(", ")}` : "Catégorie";
+  return v || "Règle";
 }
 function ruleInfoHtml(r) {
   const m = ruleMatches(r), t = RULE_TYPES[r.type] || RULE_TYPES.regex;
@@ -747,11 +770,14 @@ function renderRules() {
       <select data-f="type" aria-label="Type de règle">${Object.entries(RULE_TYPES).map(([k, t]) =>
         `<option value="${k}"${(r.type || "regex") === k ? " selected" : ""}>${t.label}</option>`).join("")}</select>
       <input type="text" data-f="value" value="${esc(r.value ?? r.pattern ?? "")}" placeholder="${esc((RULE_TYPES[r.type] || RULE_TYPES.regex).ph)}"
-        class="${r.type === "regex" ? "mono" : ""}" aria-label="Valeur">
+        class="${r.type === "regex" ? "mono" : ""}" ${r.type === "category" ? 'list="rule-cats"' : ""} aria-label="Valeur">
       <span class="rule-end"><label class="check"><input type="checkbox" data-f="enabled" ${r.enabled ? "checked" : ""}> active</label>
         <button class="small danger" data-rm-rule>Supprimer</button></span>
       <div class="rule-info">${ruleInfoHtml(r)}</div>
     </div>`).join("") || `<p class="muted">Aucune règle.</p>`;
+  const cats = [...new Set(state.releases.map((rel) => rel.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  $("#rules").insertAdjacentHTML("beforeend",
+    `<datalist id="rule-cats">${cats.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>`);
 }
 
 function renderAliases() {
@@ -935,6 +961,7 @@ $("#rules").addEventListener("input", (e) => {
     const val = row.querySelector('[data-f="value"]');
     val.placeholder = RULE_TYPES[r.type].ph;
     val.classList.toggle("mono", r.type === "regex");
+    if (r.type === "category") val.setAttribute("list", "rule-cats"); else val.removeAttribute("list");
   }
   if (f === "type" || f === "value") row.querySelector(".rule-info").innerHTML = ruleInfoHtml(r);
 });
@@ -953,7 +980,7 @@ $("#rule-add").addEventListener("click", () => {
   state.settings.rules.push({ type: "group", value: "", enabled: true });
   state.settingsDirty = true;
   renderRules();
-  $('#rules .rule:last-child [data-f="value"]').focus();
+  $('#rules .rule:last-of-type [data-f="value"]').focus();
 });
 async function saveSettings() {
   const aliases = {};

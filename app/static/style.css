@@ -147,6 +147,7 @@ table.rel.hide-last .c-last, table.rel.hide-copies .c-copies { display: none; }
 .tag.path { color: var(--muted); border: none; padding: 0; font-style: italic; }
 .c-rules { width: 120px; }
 td.c-rules .tag { display: inline-block; margin: 0 4px 3px 0; white-space: nowrap; }
+table.queue .tag.rule { display: inline-block; white-space: nowrap; }
 .rflag { font-family: var(--sans); font-size: 11.5px; font-style: italic; color: var(--muted); margin-left: 6px; white-space: nowrap; }
 
 /* Copies : une puce par tracker, pleine pour l'origine, contour pour un cross-seed */
