@@ -10,7 +10,11 @@ Limite : une recherche routée n'est pas enregistrée dans l'historique de reche
 (excludeRecentSearch) ; XSE la note dans son propre historique (scan.record_routed).
 """
 import asyncio
+import json
 import re
+import time
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -95,6 +99,69 @@ class TorznabError(RuntimeError):
     pass
 
 
+class RateLimited(TorznabError):
+    """HTTP 429 : l'indexer demande de ralentir pendant `seconds` secondes."""
+    def __init__(self, seconds: int):
+        super().__init__(f"HTTP 429 (trop de requêtes), en pause {seconds // 60} min")
+        self.seconds = seconds
+
+
+# --- pauses d'indexers ---------------------------------------------------------------------------
+# Un indexer en pause n'est pas interrogé : pause posée par cross-seed (base, ou « snoozing » dans ses
+# logs) ou par XSE lui-même après un HTTP 429 (data/indexer_pauses.json).
+
+DEFAULT_PAUSE = 3600
+
+
+def _pauses_path():
+    return config.DATA_DIR / "indexer_pauses.json"
+
+
+def _load_pauses() -> dict:
+    try:
+        return {k: float(v) for k, v in json.loads(_pauses_path().read_text()).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def pause_indexer(key: str, seconds: int) -> None:
+    data = {k: v for k, v in _load_pauses().items() if v > time.time()}
+    data[key] = time.time() + seconds
+    try:
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _pauses_path().with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(_pauses_path())
+    except OSError:
+        pass
+
+
+def _epoch(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).strip()).timestamp()
+    except ValueError:
+        return None
+
+
+def paused_until(item: dict, local: dict):
+    """Fin de pause (epoch) d'un indexer de xsdb.indexers(), ou None s'il est disponible."""
+    ends = [_epoch(item.get("retry_after")), _epoch(item.get("snooze_log")), local.get(item["key"])]
+    end = max((e for e in ends if e), default=None)
+    return end if end and end > time.time() else None
+
+
+def _retry_after(r) -> int:
+    v = (r.headers.get("Retry-After") or "").strip()
+    if v.isdigit():
+        return max(60, min(int(v), 24 * 3600))
+    try:
+        return max(60, min(int(parsedate_to_datetime(v).timestamp() - time.time()), 24 * 3600))
+    except (TypeError, ValueError):
+        return DEFAULT_PAUSE
+
+
 def _with_params(url: str, params: dict) -> str:
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query))
@@ -143,6 +210,8 @@ async def search_indexer(url: str, params_list: list) -> list:
     last = None
     for params in params_list:
         r = await clients.torznab_get(_with_params(url, params))
+        if r.status_code == 429:
+            raise RateLimited(_retry_after(r))
         if r.status_code >= 400:
             last = TorznabError(f"HTTP {r.status_code}")
             continue
@@ -184,13 +253,21 @@ async def search(item: dict, keys: list) -> dict:
     complété de « routed » (indexers interrogés), « candidates » et « errors »."""
     config.guard("recherche routée")
     entries = {e["key"]: e for e in await asyncio.to_thread(xsdb.torznab_entries) if e["state"] == "active"}
-    names = {i["key"]: i["name"] for i in (await asyncio.to_thread(xsdb.indexers))["items"]}
+    infos = {i["key"]: i for i in (await asyncio.to_thread(xsdb.indexers))["items"]}
+    names = {k: i["name"] for k, i in infos.items()}
+    local = _load_pauses()
+    paused = {k: paused_until(infos[k], local) for k in keys if k in infos}
+    paused = {k: v for k, v in paused.items() if v}
     res = {"found": 0, "injected": [], "failed": [], "exists": [], "skipped": None, "refused": None,
-           "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys], "candidates": 0, "errors": []}
+           "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys if k not in paused],
+           "paused": [f"{names.get(k, k)} (jusqu'à {datetime.fromtimestamp(v).strftime('%H:%M')})" for k, v in paused.items()],
+           "candidates": 0, "errors": []}
     params = queries(item["name"])
     offset, ident = logs.position("info")
     sent = []
     for key in keys:
+        if key in paused:
+            continue
         name = names.get(key, xsdb.fallback_name(key))
         entry = entries.get(key)
         if not entry:
@@ -198,6 +275,10 @@ async def search(item: dict, keys: list) -> dict:
             continue
         try:
             cands = plausible(await search_indexer(entry["url"], params), item.get("size") or 0)
+        except RateLimited as e:
+            pause_indexer(key, e.seconds)
+            res["paused"].append(f"{name} (429, jusqu'à {datetime.fromtimestamp(time.time() + e.seconds).strftime('%H:%M')})")
+            continue
         except (TorznabError, httpx.HTTPError) as e:
             res["errors"].append(f"{name} : {xsdb.mask(str(e) or type(e).__name__)[:150]}")
             continue

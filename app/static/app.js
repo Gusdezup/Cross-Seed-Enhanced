@@ -401,9 +401,15 @@ function routedResultHtml(r) {
   if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ${chips(r.injected)}`);
   if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection :</span> ${chips(r.failed)}`);
   if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
+  if (!parts.length && !r.routed.length && (r.paused || []).length) parts.push(`<span class="res-warn">Non cherchée : indexers en pause</span>`);
   if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat${r.candidates > 1 ? "s" : ""} examiné${r.candidates > 1 ? "s" : ""}, aucun ne correspond` : "Rien trouvé"}</span>`);
-  const tip = `Recherche routée sur : ${r.routed.join(", ")}` + (r.errors.length ? `\n\nErreurs :\n${r.errors.join("\n")}` : "");
-  let meta = `${r.routed.length} indexer${r.routed.length > 1 ? "s" : ""}`;
+  const paused = r.paused || [];
+  const asked = r.routed.length;
+  const tip = `Recherche routée sur : ${r.routed.join(", ")}`
+    + (paused.length ? `\n\nEn pause, non interrogés :\n${paused.join("\n")}` : "")
+    + (r.errors.length ? `\n\nErreurs :\n${r.errors.join("\n")}` : "");
+  let meta = `${asked} indexer${asked > 1 ? "s" : ""}`;
+  if (paused.length) meta += ` · ${paused.length} en pause`;
   if (r.errors.length) meta += ` · ⚠ ${r.errors.length}`;
   return `<span class="res-line">${parts.join(" ")} <span class="res-meta" title="${esc(tip)}">${esc(meta)}</span></span>`;
 }
@@ -533,7 +539,7 @@ function renderIndexers() {
   const rank = (i) => (i.config === "active" ? 0 : i.config === "suspended" ? 1 : 2);
   const list = d.items.filter((i) => i.config != null || i.active || showRetired).sort((a, b) => rank(a) - rank(b));
   const cards = list.map((i) => {
-    const until = [i.retry_after ? new Date(i.retry_after) : null, parseLogDate(i.snooze_log)]
+    const until = [i.retry_after ? new Date(i.retry_after) : null, parseLogDate(i.snooze_log), i.xse_pause ? new Date(i.xse_pause) : null]
       .filter((x) => x && x > now).sort((a, b) => b - a)[0];
     let cls = "", line, pending = "", btn = "";
     const rm = i.config ? `<button class="small ghost danger" data-remove="${esc(i.key)}">Retirer</button>` : "";

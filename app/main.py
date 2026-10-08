@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, jackett, logs, prowlarr, releases, scan, xsdb
+from . import clients, config, jackett, logs, prowlarr, releases, routing, scan, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -311,6 +311,11 @@ async def run_job(name: str):
 async def indexers():
     data = await asyncio.to_thread(xsdb.indexers)
     data["settings"] = await asyncio.to_thread(xsdb.useful_settings)
+    pauses = routing._load_pauses()   # pauses posées par XSE après un HTTP 429 (recherches routées)
+    for it in data["items"]:
+        end = pauses.get(it["key"])
+        if end and end > time.time():
+            it["xse_pause"] = datetime.fromtimestamp(end).isoformat(timespec="seconds")
     await prowlarr.enrich(data)
     await jackett.enrich(data)
     return jackett.link_sites(data)
