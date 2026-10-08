@@ -93,8 +93,18 @@ async def list_releases(refresh: bool = False):
     except Exception:  # noqa: BLE001
         all_hashes = {t["hash"].lower() for t in torrents}
     state = await asyncio.to_thread(xsdb.search_state)
-    releases.attach_trackers(items, state, await _indexer_labels(resolve), all_hashes, resolve)
+    labels = await _indexer_labels(resolve)
+    releases.attach_trackers(items, state, labels, all_hashes, resolve)
     scan.merge_last_search(items)
+    # Indexers sur lesquels la release est déjà en seed : la recherche routée ne les interroge pas
+    # (un tracker qui a repris les torrents d'un autre peut avoir deux infohash pour une même release,
+    # et cross-seed injecterait alors un doublon).
+    by_label = {}
+    for i in labels.values():
+        by_label.setdefault(releases._key(i["label"]), []).append(i["key"])
+    for r in items:
+        r["seeded_keys"] = [k for t in r["trackers"] if t["state"] == "seed"
+                            for k in by_label.get(releases._key(t["label"]), [])]
     trackers = {}
     for r in items:
         for c in r["copies"]:
@@ -119,7 +129,7 @@ async def _indexer_labels(resolve) -> dict:
             continue   # retiré de config.js : ses anciennes recherches ne comptent plus
         site = (it.get("prowlarr") or it.get("jackett") or {}).get("site")
         out[it["id"]] = {"label": resolve(site) if site else prowlarr.clean_name(it["name"]),
-                         "active": it["config"] == "active"}
+                         "active": it["config"] == "active", "key": it["key"]}
     return out
 
 

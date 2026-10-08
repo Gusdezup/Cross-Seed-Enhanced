@@ -396,17 +396,20 @@ function resultHtml(i) {
   return parts.join(" ");
 }
 
+const seededOrPaused = (r) => (r.paused || []).length + (r.seeded || []).length > 0;
 function routedResultHtml(r) {
   const chips = (list) => [...new Set(list)].map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" ");
   const parts = [];
   if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ${chips(r.injected)}`);
   if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection :</span> ${chips(r.failed)}`);
   if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
-  if (!parts.length && !r.routed.length && (r.paused || []).length) parts.push(`<span class="res-warn">Non cherchée : indexers en pause</span>`);
+  if (!parts.length && !r.routed.length && seededOrPaused(r)) parts.push(`<span class="res-none">${(r.paused || []).length ? "Non cherchée : indexers en pause ou déjà en seed" : "Rien à chercher : déjà en seed sur tous les indexers routés"}</span>`);
   if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat${r.candidates > 1 ? "s" : ""} examiné${r.candidates > 1 ? "s" : ""}, aucun ne correspond` : "Rien trouvé"}</span>`);
   const paused = r.paused || [];
   const asked = r.routed.length;
-  const tip = `Recherche routée sur : ${r.routed.join(", ")}`
+  const seeded = r.seeded || [];
+  const tip = `Recherche routée sur : ${r.routed.join(", ") || "aucun"}`
+    + (seeded.length ? `\n\nDéjà en seed, non interrogés : ${seeded.join(", ")}` : "")
     + (paused.length ? `\n\nEn pause, non interrogés :\n${paused.join("\n")}` : "")
     + (r.errors.length ? `\n\nErreurs :\n${r.errors.join("\n")}` : "");
   let meta = `${asked} indexer${asked > 1 ? "s" : ""}`;

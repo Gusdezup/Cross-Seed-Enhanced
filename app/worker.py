@@ -60,6 +60,7 @@ class SearchQueue:
             "id": next(_ids), "key": release["key"], "name": release["name"],
             "payload": release["payload"], "mode": release["mode"], "source": source,
             "category": release.get("category", ""), "size": release.get("size", 0),
+            "skip": release.get("seeded_keys", []),
             "status": "pending", "added": time.time(), "sent": None, "done": None,
             "result": None, "error": None,
         }

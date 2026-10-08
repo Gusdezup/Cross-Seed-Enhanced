@@ -259,14 +259,17 @@ async def search(item: dict, keys: list) -> dict:
     paused = {k: paused_until(infos[k], local) for k in keys if k in infos}
     paused = {k: v for k, v in paused.items() if v}
     res = {"found": 0, "injected": [], "failed": [], "exists": [], "skipped": None, "refused": None,
-           "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys if k not in paused],
+           "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys
+                      if k not in paused and k not in set(item.get("skip") or [])],
+           "seeded": [names.get(k, k) for k in keys if k in set(item.get("skip") or []) and k not in paused],
            "paused": [f"{names.get(k, k)} (jusqu'à {datetime.fromtimestamp(v).strftime('%H:%M')})" for k, v in paused.items()],
            "candidates": 0, "errors": []}
     params = queries(item["name"])
     offset, ident = logs.position("info")
     sent = []
+    skip = set(item.get("skip") or [])
     for key in keys:
-        if key in paused:
+        if key in paused or key in skip:
             continue
         name = names.get(key, xsdb.fallback_name(key))
         entry = entries.get(key)
