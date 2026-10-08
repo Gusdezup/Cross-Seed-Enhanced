@@ -51,6 +51,23 @@ async def xs_webhook(payload: dict) -> int:
     return r.status_code
 
 
+async def xs_announce(name: str, link: str, tracker: str) -> int:
+    """Soumet un résultat de recherche à cross-seed (comme autobrr) : 200 trouvé (injecté ou déjà présent),
+    202 trouvé mais source incomplète, 204 aucune correspondance."""
+    config.guard("envoi d'un résultat à cross-seed")
+    r = await _http.post(f"{config.XS_URL}/api/announce",
+                         json={"name": name, "guid": link, "link": link, "tracker": tracker},
+                         headers={"X-Api-Key": config.XS_APIKEY}, timeout=180)
+    if r.status_code >= 400:
+        raise RuntimeError(f"announce HTTP {r.status_code} : {r.text[:200]}")
+    return r.status_code
+
+
+async def torznab_get(url: str) -> httpx.Response:
+    """Requête Torznab vers Prowlarr ou Jackett (URL complète, clé API comprise)."""
+    return await _http.get(url, timeout=60, follow_redirects=True)
+
+
 async def xs_job(name: str) -> dict:
     config.guard(f"lancement du job {name}")
     r = await _http.post(f"{config.XS_URL}/api/job", json={"name": name},

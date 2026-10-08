@@ -375,9 +375,10 @@ function explainSkip(s) { return SKIP_WORDS.reduce((acc, [rx, fr]) => acc.replac
 
 function resultHtml(i) {
   if (i.status === "pending") return `<span class="res-none">En attente</span>`;
-  if (i.status === "running") return `<span class="res-none">Recherche envoyée, lecture des logs…</span>`;
+  if (i.status === "running") return `<span class="res-none">${i.routed ? "Recherche routée en cours…" : "Recherche envoyée, lecture des logs…"}</span>`;
   if (i.status === "error" || i.status === "timeout") return `<span class="res-bad">${esc(i.error)}</span>`;
   const r = i.result || {};
+  if (r.routed) return routedResultHtml(r);
   if (r.refused) {
     const why = /cross seed/i.test(r.refused) ? "ce torrent est lui-même un cross-seed" : r.refused;
     return `<span class="res-bad" title="${esc(r.refused)}">Refusée par cross-seed : ${esc(why)}</span>`;
@@ -390,6 +391,19 @@ function resultHtml(i) {
     if (r.skipped && !r.found) parts.push(`<span class="res-warn">Sautée : ${esc(explainSkip(r.skipped))}</span>`);
     else parts.push(`<span class="res-none">${r.found ? `${r.found} trouvé(s), rien de nouveau` : "Rien trouvé"}</span>`);
   }
+  return parts.join(" ");
+}
+
+function routedResultHtml(r) {
+  const parts = [`<span class="tag" title="Recherche faite par l'interface sur ces seuls indexers (routage par catégorie)">via ${esc(r.routed.join(", "))}</span>`];
+  if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ` +
+    r.injected.map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" "));
+  if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection sur ${esc(r.failed.join(", "))}</span>`);
+  if (!r.injected.length && !r.failed.length) {
+    if (r.exists.length) parts.push(`<span class="res-none">déjà en seed sur ${esc([...new Set(r.exists)].join(", "))}</span>`);
+    else parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat(s), aucun ne correspond` : "Rien trouvé"}</span>`);
+  }
+  if (r.errors.length) parts.push(`<span class="res-bad" title="${esc(r.errors.join("\n"))}">${r.errors.length} erreur${r.errors.length > 1 ? "s" : ""} : ${esc(r.errors[0])}${r.errors.length > 1 ? "…" : ""}</span>`);
   return parts.join(" ");
 }
 
@@ -780,6 +794,62 @@ function renderRules() {
     `<datalist id="rule-cats">${cats.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>`);
 }
 
+// ---------- routage par catégorie ----------
+function routeInfoHtml(r) {
+  const cat = String(r.category || "").trim().toLowerCase();
+  if (!cat) return `<span class="res-none">Renseigne une catégorie</span>`;
+  const n = state.releases.filter((rel) => (rel.category || "").toLowerCase() === cat).length;
+  const rel = n ? `<span class="res-hit">${n} release${n > 1 ? "s" : ""}</span>` : `<span class="res-warn">Aucune release dans cette catégorie</span>`;
+  const idx = r.indexers.length ? `cherchée${n > 1 ? "s" : ""} sur ${r.indexers.length} indexer${r.indexers.length > 1 ? "s" : ""}`
+    : `<span class="res-warn">aucun indexer coché : recherche normale sur tous les indexers</span>`;
+  return `${rel}, ${idx}`;
+}
+function renderRoutes() {
+  const routes = state.settings.routes || (state.settings.routes = []);
+  if (!idxData) { $("#routes").innerHTML = `<p class="muted">Chargement des indexers…</p>`; loadIndexers().then(() => { if (idxData) renderRoutes(); else $("#routes").innerHTML = `<p class="muted">Liste des indexers indisponible.</p>`; }); return; }
+  const active = idxData.items.filter((i) => i.config === "active");
+  $("#routes").innerHTML = routes.map((r, n) => {
+    const others = r.indexers.filter((k) => !active.some((i) => i.key === k)).map((k) => {
+      const it = idxData.items.find((i) => i.key === k);
+      return { key: k, name: it ? it.name : k, off: true };
+    });
+    const boxes = [...active, ...others].map((i) => `<label class="check${i.off ? " off" : ""}"${i.off ? ' title="Suspendu ou retiré de config.js : ignoré"' : ""}>
+        <input type="checkbox" data-key="${esc(i.key)}" ${r.indexers.includes(i.key) ? "checked" : ""}>
+        <span style="color:${i.off ? "inherit" : trackerColor(i.name)}">${esc(i.name)}</span>${i.off ? " (inactif)" : ""}</label>`).join("");
+    return `<div class="route" data-i="${n}">
+      <input type="text" data-f="category" list="rule-cats" value="${esc(r.category)}" placeholder="Catégorie, ex. radarr" aria-label="Catégorie">
+      <div class="route-idx">${boxes || `<span class="muted">Aucun indexer actif dans config.js</span>`}</div>
+      <button class="small danger" data-rm-route>Supprimer</button>
+      <div class="rule-info">${routeInfoHtml(r)}</div>
+    </div>`;
+  }).join("") || `<p class="muted">Aucun routage : toutes les recherches passent par cross-seed, sur tous ses indexers.</p>`;
+}
+$("#routes").addEventListener("input", (e) => {
+  const row = e.target.closest(".route");
+  if (!row) return;
+  const r = state.settings.routes[+row.dataset.i];
+  if (e.target.dataset.f === "category") r.category = e.target.value;
+  else if (e.target.dataset.key) {
+    const k = e.target.dataset.key;
+    r.indexers = e.target.checked ? [...new Set([...r.indexers, k])] : r.indexers.filter((x) => x !== k);
+  } else return;
+  state.settingsDirty = true;
+  row.querySelector(".rule-info").innerHTML = routeInfoHtml(r);
+});
+$("#routes").addEventListener("click", (e) => {
+  const row = e.target.closest(".route");
+  if (!row || !e.target.closest("[data-rm-route]")) return;
+  state.settings.routes.splice(+row.dataset.i, 1);
+  state.settingsDirty = true;
+  renderRoutes();
+});
+$("#route-add").addEventListener("click", () => {
+  state.settings.routes.push({ category: "", indexers: [] });
+  state.settingsDirty = true;
+  renderRoutes();
+  $('#routes .route:last-of-type [data-f="category"]').focus();
+});
+
 function renderAliases() {
   const aliases = state.settings.tracker_aliases || {};
   const hosts = Object.keys(state.trackers).filter(Boolean).sort();
@@ -792,6 +862,7 @@ async function renderSettings() {
   if (!state.settings) state.settings = await api("/api/settings");
   $("#set-delay").value = state.settings.delay;
   renderRules();
+  renderRoutes();
   renderAliases();
   renderSources();
   renderXsForm();
@@ -988,7 +1059,7 @@ async function saveSettings() {
   try {
     state.settings = await api("/api/settings", {
       method: "PUT",
-      body: { delay: +$("#set-delay").value, rules: state.settings.rules, tracker_aliases: aliases },
+      body: { delay: +$("#set-delay").value, rules: state.settings.rules, routes: state.settings.routes, tracker_aliases: aliases },
     });
     state.settingsDirty = false;
     toast("Réglages enregistrés");

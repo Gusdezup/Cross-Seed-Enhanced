@@ -295,3 +295,11 @@ tr.detail td { background: var(--raised); }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
 tr.detail h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
 tr.detail .mini th { font-size: 12px; padding: 3px 6px; border: 0; }
+
+/* --- routage par catégorie --- */
+.route { display: grid; grid-template-columns: 220px 1fr auto; gap: 8px 12px; align-items: start;
+  margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.route-idx { display: flex; flex-wrap: wrap; gap: 4px 14px; padding-top: 6px; }
+.route-idx .off { color: var(--muted); font-style: italic; }
+.route .rule-info { grid-column: 1 / -1; }
+@media (max-width: 700px) { .route { grid-template-columns: 1fr auto; } .route-idx { grid-column: 1 / -1; } }

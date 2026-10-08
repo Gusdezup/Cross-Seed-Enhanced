@@ -43,6 +43,8 @@ DEFAULT_SETTINGS = {
     "delay": 60,
     "rules": [],
     "tracker_aliases": {},
+    # Routage : [{"category": "radarr", "indexers": [clé d'indexer, …]}] (clé = URL Torznab normalisée)
+    "routes": [],
     # Sources d'indexers saisies dans l'interface (le .env reste prioritaire)
     "sources": {"prowlarr": {"url": "", "apikey": ""}, "jackett": {"url": "", "apikey": ""}},
 }
@@ -113,9 +115,25 @@ def load_settings() -> dict:
     merged.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
     merged["rules"] = [{k: v for k, v in _upgrade(r).items() if k != "name"} for r in merged["rules"]]
     src = data.get("sources") if isinstance(data.get("sources"), dict) else {}
+    merged["routes"] = clean_routes(merged.get("routes"))
     merged["sources"] = {n: {"url": str((src.get(n) or {}).get("url", "")),
                              "apikey": str((src.get(n) or {}).get("apikey", ""))} for n in SOURCES}
     return merged
+
+
+def clean_routes(routes) -> list:
+    """Routes valides : une catégorie non vide, une seule fois (majuscules et minuscules confondues)."""
+    out, seen = [], set()
+    for r in routes if isinstance(routes, list) else []:
+        if not isinstance(r, dict):
+            continue
+        cat = str(r.get("category", "")).strip()
+        if not cat or cat.lower() in seen:
+            continue
+        seen.add(cat.lower())
+        idx = [str(k).strip() for k in r.get("indexers") or [] if str(k).strip()]
+        out.append({"category": cat, "indexers": list(dict.fromkeys(idx))})
+    return out
 
 
 def public_settings(s: dict) -> dict:
@@ -168,6 +186,8 @@ def save_settings(data: dict) -> dict:
         for n in SOURCES:
             if isinstance(data["sources"].get(n), dict):
                 clean["sources"][n] = _clean_source(data["sources"][n], clean["sources"][n])
+    if "routes" in data:
+        clean["routes"] = clean_routes(data["routes"])
     if "tracker_aliases" in data:
         clean["tracker_aliases"] = {str(k): str(v).strip()
                                     for k, v in data["tracker_aliases"].items() if str(v).strip()}

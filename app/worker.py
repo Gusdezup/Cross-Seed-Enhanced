@@ -6,7 +6,7 @@ import time
 
 import httpx
 
-from . import clients, config, logs
+from . import clients, config, logs, routing
 
 _ids = itertools.count(1)
 
@@ -59,6 +59,7 @@ class SearchQueue:
         item = {
             "id": next(_ids), "key": release["key"], "name": release["name"],
             "payload": release["payload"], "mode": release["mode"], "source": source,
+            "category": release.get("category", ""), "size": release.get("size", 0),
             "status": "pending", "added": time.time(), "sent": None, "done": None,
             "result": None, "error": None,
         }
@@ -121,6 +122,10 @@ class SearchQueue:
             await self._send(item)
 
     async def _send(self, item: dict):
+        route = routing.route_for(item.get("category", ""))
+        if route:
+            await self._send_routed(item, route)
+            return
         item["status"] = "running"
         item["sent"] = time.time()
         offset, ident = logs.position("info")
@@ -140,6 +145,24 @@ class SearchQueue:
         self.last_sent = time.time()
         self.save()
         asyncio.create_task(self._follow(item, offset, ident))
+
+    async def _send_routed(self, item: dict, keys: list):
+        """Catégorie routée : XSE interroge lui-même les indexers choisis (voir routing.py)."""
+        item.update(status="running", sent=time.time(), routed=True)
+        self.save()
+        try:
+            res = await routing.search(item, keys)
+        except httpx.TransportError:
+            item.update(status="pending", sent=None)
+            self.last_sent = time.time()
+            self.save()
+            return
+        except Exception as e:  # noqa: BLE001
+            item.update(status="error", error=str(e)[:300], done=time.time())
+        else:
+            item.update(status="done", result=res, done=time.time())
+        self.last_sent = time.time()
+        self.save()
 
     async def _follow(self, item: dict, offset: int, ident):
         """Lit les logs info jusqu'à trouver le résumé « Found N torrents for … »."""

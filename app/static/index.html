@@ -160,6 +160,11 @@
       <div id="rules"></div>
       <button class="ghost" id="rule-add">Ajouter une règle</button>
 
+      <h2>Routage par catégorie</h2>
+      <p class="muted">Pour une catégorie routée, chaque recherche de la file (bouton « Chercher » ou règle) n'interroge que les indexers cochés : l'interface les interroge elle-même, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Les autres catégories restent cherchées par cross-seed sur tous ses indexers. Le scan complet, le RSS et l'announce de cross-seed ne sont pas concernés. Une recherche routée n'apparaît pas dans la colonne « Dernière recherche ».</p>
+      <div id="routes"></div>
+      <button class="ghost" id="route-add">Ajouter un routage</button>
+
       <h2>Rythme</h2>
       <label class="field">Délai entre deux recherches
         <span><input type="number" id="set-delay" min="5" max="3600"> secondes</span>
