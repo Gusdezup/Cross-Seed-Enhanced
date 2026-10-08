@@ -897,6 +897,9 @@ function scanStatusText(info) {
   return parts.join(" ");
 }
 function scanXsNote(info, pendingRestart) {
+  const v7 = info.xs_version === "7";
+  $("#scan-replace").closest("label").hidden = v7;
+  if (v7) return "cross-seed v7 : son scan complet (searchCadence) se règle dans son interface native. Pour le remplacer par ce scan planifié, désactive-le là-bas.";
   const x = info.xs_cadence;
   $("#scan-replace").disabled = !x || state.configWrite === false;
   if (!x) return "searchCadence introuvable dans config.js : à modifier à la main.";

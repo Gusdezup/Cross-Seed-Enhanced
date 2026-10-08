@@ -39,9 +39,13 @@ docker compose up -d
 
 Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, ainsi que `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
 
-### cross-seed v7
+### cross-seed v7 (expérimental)
 
-Utilise `docker-compose.v7.yml` comme stack autonome (Dockge peut importer son contenu), avec `XS_VERSION=7` dans `.env` et le même `XS_CONFIG_PATH` que cross-seed. Le dossier de configuration est monté en lecture seule. Les indexers sont ajoutés, suspendus et retirés via `/api/indexer/v1` avec la clé API de cross-seed ; les modifications sont directes et ne demandent pas de redémarrage. Les réglages généraux restent à modifier dans l'interface native de cross-seed v7 : son API de réglages requiert une session utilisateur, pas la clé API. Le bouton de redémarrage n'est pas proposé par cette stack v7.
+> cross-seed v7 est encore en préversion et son schéma de base évolue d'une préversion à l'autre. Ce mode est testé avec 7.0.0-22 ; une préversion plus récente peut casser une partie de l'interface.
+
+La version de cross-seed est **détectée automatiquement** à partir de sa base (`XS_VERSION` vide). `XS_VERSION=6` ou `7` force la version si besoin.
+
+Utilise `docker-compose.v7.yml` comme stack autonome (Dockge peut importer son contenu), avec le même `XS_CONFIG_PATH` que cross-seed. Le dossier de configuration est monté en lecture seule. Les indexers sont ajoutés, suspendus et retirés via `/api/indexer/v1` avec la clé API de cross-seed ; les modifications sont directes et ne demandent pas de redémarrage. Les réglages généraux restent à modifier dans l'interface native de cross-seed v7 : son API de réglages requiert une session utilisateur, pas la clé API. Le bouton de redémarrage n'est pas proposé par cette stack v7.
 
 Le mode v7 lit `cross-seed.db` et ses fichiers WAL pour l'historique. Il ne migre pas les données v6 et n'écrit jamais directement dans cette base. Le mode v6 et son `docker-compose.yml` restent inchangés.
 
@@ -71,7 +75,7 @@ Pour faire tourner une seconde instance (par exemple construite depuis les sourc
 - Le schéma de `cross-seed.db` n'est pas documenté. Si une version de cross-seed le change, l'historique par indexer affichera « indisponible », le reste continuera de fonctionner.
 - Une recherche routée n'est pas enregistrée dans l'historique de recherche de cross-seed (`excludeRecentSearch` ne s'y applique pas) ; l'interface la note dans son propre historique, utilisé par la colonne « Dernière recherche » et par le scan planifié.
 - La suspension d'indexers suppose un tableau `torznab` avec une URL par ligne.
-- En v7, l'édition des réglages généraux se fait dans l'interface native de cross-seed.
+- En v7, l'édition des réglages généraux se fait dans l'interface native de cross-seed, y compris `searchCadence` : la case « Remplacer le scan complet de cross-seed » du scan planifié n'est pas disponible.
 
 ## Licence
 

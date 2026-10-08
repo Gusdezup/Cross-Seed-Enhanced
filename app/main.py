@@ -67,6 +67,7 @@ async def status():
         out["xs"]["error"] = str(e)[:200]
     out["restart_available"] = bool(config.DOCKER_URL) and not config.READONLY
     out["xs_version"] = config.XS_VERSION
+    out["xs_version_source"] = config.XS_VERSION_SOURCE
     out["readonly"] = config.READONLY
     out["config_write"] = config.XS_VERSION == "6" and (not config.READONLY or config.ALLOW_CONFIG_WRITE)
     out["files"] = {
@@ -201,7 +202,10 @@ def _scan_info() -> dict:
     settings = config.load_settings()
     state = scan.load_state()
     xs = xsdb.useful_settings().get("searchCadence")
+    if config.XS_VERSION == "7":
+        xs = None   # en v7, searchCadence n'est pas modifiable d'ici (interface native)
     return {"state": state, "next_run": scan.next_run(settings, state), "readonly": config.READONLY,
+            "xs_version": config.XS_VERSION,
             "xs_cadence": None if xs is None else {"value": xs["value"], "disabled": xs["kind"] == "empty"}}
 
 
@@ -224,6 +228,8 @@ async def scan_run():
 @app.post("/api/scan/replace")
 async def scan_replace(body: dict):
     """Coupe (searchCadence: null) ou rétablit le scan complet de cross-seed dans config.js."""
+    if config.XS_VERSION == "7":
+        raise HTTPException(400, "cross-seed v7 : searchCadence se règle dans l'interface native de cross-seed")
     replace = bool(body.get("replace"))
     cur = await asyncio.to_thread(lambda: xsdb.useful_settings().get("searchCadence"))
     if cur is None:

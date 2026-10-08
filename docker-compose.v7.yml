@@ -8,7 +8,7 @@ services:
     env_file:
       - .env
     environment:
-      XS_VERSION: "7"
+      XS_VERSION: "7"   # facultatif : la version est aussi détectée automatiquement
     volumes:
       # Base et logs cross-seed v7 : lecture seule. Aucune écriture SQLite directe.
       - ${XS_CONFIG_PATH}:/cs-config:ro

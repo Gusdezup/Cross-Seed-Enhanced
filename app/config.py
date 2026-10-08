@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -9,9 +10,9 @@ QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
 QBT_APIKEY = os.environ.get("QBT_APIKEY", "")
 XS_URL = os.environ.get("XS_URL", "http://cross-seed:2468").rstrip("/")
 XS_APIKEY = os.environ.get("XS_APIKEY", "")
-XS_VERSION = os.environ.get("XS_VERSION", "6").strip()
-if XS_VERSION not in ("6", "7"):
-    raise ValueError("XS_VERSION doit être 6 ou 7")
+XS_VERSION = os.environ.get("XS_VERSION", "").strip()   # vide : détection automatique (plus bas)
+if XS_VERSION not in ("", "6", "7"):
+    raise ValueError("XS_VERSION doit être 6, 7 ou vide (détection automatique)")
 PROWLARR_URL = os.environ.get("PROWLARR_URL", "").rstrip("/")
 PROWLARR_APIKEY = os.environ.get("PROWLARR_APIKEY", "")
 JACKETT_URL = os.environ.get("JACKETT_URL", "").rstrip("/")
@@ -40,6 +41,29 @@ def guard(action: str, *, config_write: bool = False) -> None:
 LOGS_DIR = XS_CONFIG_DIR / "logs"
 PENDING_DIR = XS_CONFIG_DIR / "cross-seeds"
 XS_DB = XS_CONFIG_DIR / "cross-seed.db"
+
+
+def _detect_version() -> str:
+    """cross-seed v7 ajoute la colonne indexer.enabled (migration 14) ; absente en v6.
+    Base illisible ou absente : v6, le fonctionnement historique."""
+    if not XS_DB.exists():
+        return "6"
+    uri = f"file:{XS_DB}?mode=ro"
+    for suffix in ("", "&immutable=1"):
+        try:
+            con = sqlite3.connect(uri + suffix, uri=True, timeout=5)
+            try:
+                cols = {r[1] for r in con.execute("PRAGMA table_info('indexer')")}
+            finally:
+                con.close()
+            return "7" if "enabled" in cols else "6"
+        except sqlite3.Error:
+            continue
+    return "6"
+
+
+XS_VERSION_SOURCE = "XS_VERSION" if XS_VERSION else "détection automatique"
+XS_VERSION = XS_VERSION or _detect_version()
 XS_CONFIG_JS = XS_CONFIG_DIR / "config.js"
 
 DEFAULT_SETTINGS = {
