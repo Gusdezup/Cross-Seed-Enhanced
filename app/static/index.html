@@ -21,9 +21,9 @@
 
 <div class="shell">
   <nav class="rail" aria-label="Sections">
-    <a href="#search" data-tab="search"><span><i class="n">1</i>Chercher</span> <b id="cnt-releases"></b></a>
-    <a href="#follow" data-tab="follow"><span><i class="n">2</i>Suivre<span class="long">&nbsp;l'avancement</span></span> <b id="cnt-queue"></b></a>
-    <a href="#settings" data-tab="settings"><span><i class="n">3</i>Réglages</span> <b id="cnt-indexers"></b></a>
+    <a href="#search" data-tab="search"><span>Chercher</span> <b id="cnt-releases"></b></a>
+    <a href="#follow" data-tab="follow"><span>Suivre<span class="long">&nbsp;l'avancement</span></span> <b id="cnt-queue"></b></a>
+    <a href="#settings" data-tab="settings"><span>Réglages</span> <b id="cnt-indexers"></b></a>
   </nav>
 
   <main>
@@ -33,11 +33,11 @@
     <section id="tab-search" class="tab">
       <div class="step">
         <h3><span class="num">1</span>Quelles releases ?</h3>
+        <input type="search" id="s-text" class="s-text" placeholder="Mot clé dans le nom : HDForever, Remux, 1080p…" autocomplete="off" aria-label="Mot clé dans le nom">
         <div class="chips" id="s-scope" role="group" aria-label="Releases"></div>
         <details class="refine" id="s-refine">
           <summary>Affiner <span id="s-refine-sum"></span></summary>
           <div class="refine-grid">
-            <label class="field">Nom contient<input type="search" id="s-text" placeholder="ex. HDForever 1080p" autocomplete="off"></label>
             <label class="field">Règle prioritaire<select id="s-rule"><option value="">Peu importe</option></select></label>
             <label class="field">Présente sur le tracker<select id="s-ontracker"><option value="">Peu importe</option></select></label>
             <label class="field">État

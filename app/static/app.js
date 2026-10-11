@@ -635,7 +635,7 @@ function renderSearch() {
 }
 
 function refineSummary() {
-  const n = [search.text, search.rule, search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
+  const n = [search.rule, search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
   $("#s-refine-sum").textContent = n ? `(${n} filtre${n > 1 ? "s" : ""})` : "";
 }
 
@@ -720,7 +720,7 @@ for (const [sel, k] of Object.entries(REFINE)) {
   });
 }
 $("#s-reset").addEventListener("click", () => {
-  Object.assign(search, { text: "", rule: "", state: "", onTracker: "", fresh: "all", maxSeeds: "", limit: "" });
+  Object.assign(search, { rule: "", state: "", onTracker: "", fresh: "all", maxSeeds: "", limit: "" });
   searchChanged();
 });
 $("#s-go").addEventListener("click", async (e) => {

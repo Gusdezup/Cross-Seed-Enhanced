@@ -469,3 +469,6 @@ table.rel td:nth-child(2) { min-width: 260px; }
   .list-tools .btns { width: 100%; }
   .list-tools select { flex: 1; }
 }
+
+/* recherche par mot clé, toujours visible en tête de Chercher */
+.s-text { width: 100%; max-width: 560px; display: block; margin-bottom: 12px; padding: 9px 12px !important; font-size: 15px; }
