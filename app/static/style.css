@@ -438,7 +438,9 @@ table.rel td:nth-child(2) { min-width: 260px; }
 
 @media (max-width: 860px) {
   .rail { gap: 6px; }
-  .rail { align-items: stretch; }
+  /* page courte (ex. aucune injection en attente) : la grille ne doit pas étirer la barre d'onglets */
+  .shell { grid-template-rows: auto 1fr; align-content: start; }
+  .rail { align-items: center; }
   .rail a { flex: 1 1 0; justify-content: center; padding: 8px 6px; font-size: 14px; }
   .rail .long { display: none; }
   .rail a b { display: none; }
