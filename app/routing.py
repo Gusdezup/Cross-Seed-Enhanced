@@ -7,7 +7,7 @@ Pour une release dont la catégorie a une route, XSE interroge donc lui-même le
 fichiers) et injecte comme pour n'importe quelle correspondance.
 
 Limite : une recherche routée n'est pas enregistrée dans l'historique de recherche de cross-seed
-(excludeRecentSearch) ; XSE la note dans son propre historique (scan.record_routed).
+(excludeRecentSearch) ; XSE la note dans son propre historique, indexer par indexer (scan.record_routed).
 """
 import asyncio
 import json
@@ -238,14 +238,10 @@ def plausible(cands: list, size: int) -> list:
 # --- routes -----------------------------------------------------------------------------------------
 
 def route_for(category: str) -> list:
-    """Clés des indexers (URL Torznab normalisée) associés à cette catégorie, ou [] : recherche normale."""
-    cat = (category or "").strip().lower()
-    if not cat:
-        return []
-    for r in config.load_settings().get("routes", []):
-        if r["category"].lower() == cat and r["indexers"]:
-            return r["indexers"]
-    return []
+    """Clés des indexers (URL Torznab normalisée) du groupe de cette catégorie, ou [] : catégorie rangée
+    dans aucun groupe (ou groupe sans indexer), recherche normale par cross-seed sur tous ses indexers."""
+    g = config.group_for(category, config.load_settings()["groups"])
+    return g["indexers"] if g else []
 
 
 async def search(item: dict, keys: list) -> dict:
@@ -263,7 +259,7 @@ async def search(item: dict, keys: list) -> dict:
                       if k not in paused and k not in set(item.get("skip") or [])],
            "seeded": [names.get(k, k) for k in keys if k in set(item.get("skip") or []) and k not in paused],
            "paused": [f"{names.get(k, k)} (jusqu'à {datetime.fromtimestamp(v).strftime('%H:%M')})" for k, v in paused.items()],
-           "candidates": 0, "errors": []}
+           "candidates": 0, "errors": [], "searched": []}
     params = queries(item["name"])
     offset, ident = logs.position("info")
     sent = []
@@ -285,6 +281,7 @@ async def search(item: dict, keys: list) -> dict:
         except (TorznabError, httpx.HTTPError) as e:
             res["errors"].append(f"{name} : {xsdb.mask(str(e) or type(e).__name__)[:150]}")
             continue
+        res["searched"].append(key)   # clé d'indexer effectivement interrogé (historique par indexer)
         res["candidates"] += len(cands)
         for c in cands:
             tracker = c["tracker"] or name

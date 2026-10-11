@@ -215,5 +215,35 @@ def attach_trackers(items: list, state: dict, indexers: dict, all_hashes: set, r
 MATCHES = {"MATCH", "MATCH_SIZE_ONLY", "MATCH_PARTIAL"}
 
 
+def attach_routed(items: list, routed: dict, key_labels: dict) -> None:
+    """Ajoute à l'état par tracker les recherches routées de XSE (que cross-seed n'enregistre pas) :
+    un indexer « jamais cherché » interrogé par XSE devient « cherchée, rien trouvé » (s'il avait trouvé,
+    la copie serait en seed), et sa date de dernière recherche est mise à jour.
+    routed : scan.routed_by_indexer() ; key_labels : {clé d'indexer: nom affiché}."""
+    for r in items:
+        hist = routed.get(r["key"])
+        if not hist:
+            continue
+        by = {_key(t["label"]): t for t in r["trackers"]}
+        for ikey, when in hist.items():
+            label = key_labels.get(ikey)
+            t = by.get(_key(label)) if label else None
+            if not t:
+                continue   # indexer retiré de config.js depuis
+            if not t["last_search"] or when > t["last_search"]:
+                t["last_search"] = when
+            if t["state"] == "never":
+                t["state"] = "nomatch"
+        r["trackers"].sort(key=lambda t: (STATE_ORDER[t["state"]], t["label"].lower()))
+
+
+def target_state(r: dict, label: str) -> tuple:
+    """(état, date de dernière recherche) de la release sur le tracker de ce nom ; ("never", None) s'il
+    n'apparaît pas dans son état par tracker."""
+    k = _key(label)
+    t = next((t for t in r["trackers"] if _key(t["label"]) == k), None)
+    return (t["state"], t["last_search"]) if t else ("never", None)
+
+
 def get(key: str):
     return _cache["by_key"].get(key)

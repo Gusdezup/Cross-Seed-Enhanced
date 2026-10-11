@@ -43,8 +43,11 @@ DEFAULT_SETTINGS = {
     "delay": 60,
     "rules": [],
     "tracker_aliases": {},
-    # Routage : [{"category": "radarr", "indexers": [clé d'indexer, …]}] (clé = URL Torznab normalisée)
-    "routes": [],
+    # Groupes de trackers, construits par l'utilisateur selon sa stack :
+    # [{"name": "Vidéo", "categories": ["radarr", "sonarr"], "others": False, "indexers": [clé d'indexer, …]}]
+    # (clé = URL Torznab normalisée ; "" dans categories = torrents sans catégorie ; "others" : le groupe
+    # reçoit aussi toutes les catégories rangées dans aucun autre groupe). Remplace l'ancien « routes ».
+    "groups": [],
     # Scan planifié par XSE (remplace ou complète le scan complet de cross-seed)
     "scan": {"enabled": False, "every_hours": 24, "limit": 400, "recent_days": 7},
     # Sources d'indexers saisies dans l'interface (le .env reste prioritaire)
@@ -117,26 +120,57 @@ def load_settings() -> dict:
     merged.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
     merged["rules"] = [{k: v for k, v in _upgrade(r).items() if k != "name"} for r in merged["rules"]]
     src = data.get("sources") if isinstance(data.get("sources"), dict) else {}
-    merged["routes"] = clean_routes(merged.get("routes"))
+    if "groups" not in data and data.get("routes"):
+        merged["groups"] = groups_from_routes(data["routes"])   # réglages d'avant la v0.6
+    merged["groups"] = clean_groups(merged.get("groups"))
     merged["scan"] = clean_scan(merged.get("scan"))
     merged["sources"] = {n: {"url": str((src.get(n) or {}).get("url", "")),
                              "apikey": str((src.get(n) or {}).get("apikey", ""))} for n in SOURCES}
     return merged
 
 
-def clean_routes(routes) -> list:
-    """Routes valides : une catégorie non vide, une seule fois (majuscules et minuscules confondues)."""
-    out, seen = [], set()
+def groups_from_routes(routes) -> list:
+    """Anciennes routes (une catégorie → des indexers) : un groupe par route, nommé comme sa catégorie.
+    Comportement identique tant que l'utilisateur ne les regroupe pas."""
+    out = []
     for r in routes if isinstance(routes, list) else []:
-        if not isinstance(r, dict):
-            continue
-        cat = str(r.get("category", "")).strip()
-        if not cat or cat.lower() in seen:
-            continue
-        seen.add(cat.lower())
-        idx = [str(k).strip() for k in r.get("indexers") or [] if str(k).strip()]
-        out.append({"category": cat, "indexers": list(dict.fromkeys(idx))})
+        if isinstance(r, dict) and str(r.get("category", "")).strip():
+            cat = str(r["category"]).strip()
+            out.append({"name": cat, "categories": [cat], "others": False, "indexers": r.get("indexers") or []})
     return out
+
+
+def clean_groups(groups) -> list:
+    """Groupes valides : un nom unique ; une catégorie n'appartient qu'à un seul groupe (le premier) ;
+    un seul groupe « toutes les autres catégories ». Majuscules et minuscules confondues."""
+    out, names, cats, others = [], set(), set(), False
+    for g in groups if isinstance(groups, list) else []:
+        if not isinstance(g, dict):
+            continue
+        name = str(g.get("name", "")).strip()[:60]
+        if not name or name.lower() in names:
+            continue
+        names.add(name.lower())
+        mine = []
+        for c in g.get("categories") or []:
+            c = str(c).strip()
+            if c.lower() not in cats:   # "" (sans catégorie) est une valeur permise
+                cats.add(c.lower())
+                mine.append(c)
+        oth = bool(g.get("others")) and not others
+        others = others or oth
+        idx = [str(k).strip() for k in g.get("indexers") or [] if str(k).strip()]
+        out.append({"name": name, "categories": mine, "others": oth, "indexers": list(dict.fromkeys(idx))})
+    return out
+
+
+def group_for(category: str, groups: list):
+    """Groupe d'une catégorie qBittorrent : celui qui la contient, sinon celui des « autres catégories »."""
+    cat = (category or "").strip().lower()
+    for g in groups:
+        if any(c.lower() == cat for c in g["categories"]):
+            return g
+    return next((g for g in groups if g["others"]), None)
 
 
 def _bounded(v, default: int, lo: int, hi: int) -> int:
@@ -205,8 +239,8 @@ def save_settings(data: dict) -> dict:
         for n in SOURCES:
             if isinstance(data["sources"].get(n), dict):
                 clean["sources"][n] = _clean_source(data["sources"][n], clean["sources"][n])
-    if "routes" in data:
-        clean["routes"] = clean_routes(data["routes"])
+    if "groups" in data:
+        clean["groups"] = clean_groups(data["groups"])
     if "scan" in data:
         clean["scan"] = clean_scan({**clean["scan"], **(data["scan"] if isinstance(data["scan"], dict) else {})})
     if "tracker_aliases" in data:

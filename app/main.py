@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, jackett, logs, prowlarr, releases, routing, scan, xsdb
+from . import clients, config, demandes, jackett, logs, prowlarr, releases, routing, scan, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -95,6 +95,8 @@ async def list_releases(refresh: bool = False):
     state = await asyncio.to_thread(xsdb.search_state)
     labels = await _indexer_labels(resolve)
     releases.attach_trackers(items, state, labels, all_hashes, resolve)
+    active = await _active_indexers(resolve)
+    releases.attach_routed(items, scan.routed_by_indexer(), active)
     scan.merge_last_search(items)
     # Indexers sur lesquels la release est déjà en seed : la recherche routée ne les interroge pas
     # (un tracker qui a repris les torrents d'un autre peut avoir deux infohash pour une même release,
@@ -109,7 +111,21 @@ async def list_releases(refresh: bool = False):
     for r in items:
         for c in r["copies"]:
             trackers.setdefault(c["host"], c["tracker"])
-    return {"releases": items, "trackers": trackers, "torrents": len(torrents)}
+    out = {"releases": items, "trackers": trackers, "torrents": len(torrents),
+           "indexers": [{"key": k, "label": v} for k, v in active.items()]}
+    _rel_cache.update(ts=time.time(), data=out)
+    return out
+
+
+_rel_cache = {"ts": 0.0, "data": None}
+
+
+async def _releases_cached(max_age: int = 60) -> dict:
+    """Liste des releases récente (aperçu d'une demande pendant la saisie : pas de rechargement à chaque
+    frappe). Rechargée si elle a plus de `max_age` secondes."""
+    if _rel_cache["data"] is None or time.time() - _rel_cache["ts"] > max_age:
+        await list_releases()
+    return _rel_cache["data"]
 
 
 _idx_cache = {"ts": 0.0, "data": None}
@@ -133,6 +149,22 @@ async def _indexer_labels(resolve) -> dict:
     return out
 
 
+async def _active_indexers(resolve=None) -> dict:
+    """{clé d'indexer actif dans config.js: nom affiché}, y compris un indexer ajouté que cross-seed
+    n'a pas encore enregistré (redémarrage en attente). Même nom que dans la colonne Trackers."""
+    if resolve is None:
+        settings = config.load_settings()
+        resolve = releases.make_resolver(settings, {**await jackett.site_names(), **await prowlarr.site_names()})
+    await _indexer_labels(resolve)   # remplit le cache des indexers
+    out = {}
+    for it in _idx_cache["data"]["items"]:
+        if it.get("config") != "active" or it["key"] in out:
+            continue
+        site = (it.get("prowlarr") or it.get("jackett") or {}).get("site")
+        out[it["key"]] = resolve(site) if site else prowlarr.clean_name(it["name"])
+    return dict(sorted(out.items(), key=lambda kv: kv[1].lower()))
+
+
 @app.post("/api/releases/history")
 async def release_history(body: dict):
     r = releases.get(body.get("key", ""))
@@ -149,12 +181,52 @@ async def search(body: dict):
     keys = body.get("keys") or []
     if not releases.get(keys[0] if keys else ""):
         await list_releases()
+    batch = None
+    if len(keys) > 1:
+        batch = queue.new_batch(f"Sélection de {len(keys)} releases", "manuel", detail="trackers des groupes")
     added = 0
     for k in keys:
         r = releases.get(k)
-        if r and queue.add(r, source="manuel", front=True):
+        if r and queue.add(r, source="manuel", front=True, batch=batch, save=False):
             added += 1
+    queue.save()
     return {"added": added, "skipped": len(keys) - added}
+
+
+# --- demandes ciblées (onglet Chercher) -------------------------------------------
+
+async def _demande(body: dict) -> tuple:
+    data = await _releases_cached(0 if (body or {}).get("refresh") else 60)
+    crit = demandes.normalize(body)
+    active = {i["key"]: i["label"] for i in data["indexers"]}
+    sel = demandes.select(data["releases"], crit, config.load_settings(), active)
+    return crit, active, sel
+
+
+@app.post("/api/demandes/preview")
+async def demande_preview(body: dict):
+    crit, active, sel = await _demande(body)
+    delay = config.load_settings()["delay"]
+    rel = sel["releases"]
+    queued = queue.snapshot()["pending"]
+    what, to = demandes.label(crit, active)
+    return {"count": len(rel), "matched": sel["matched"], "counts": sel["counts"],
+            "examples": [{"name": r["name"], "category": r["category"], "seeds": r["seeds"]} for r in rel[:6]],
+            "duration": len(rel) * delay, "queued_before": queued, "delay": delay,
+            "label": what, "to": to}
+
+
+@app.post("/api/demandes")
+async def demande_launch(body: dict):
+    crit, active, sel = await _demande({**(body or {}), "refresh": True})
+    if not sel["releases"]:
+        raise HTTPException(400, "Aucune release ne correspond à cette demande")
+    what, to = demandes.label(crit, active)
+    bid = queue.new_batch(what, "demande", targets=crit["targets"], detail=to)
+    added = sum(1 for r in sel["releases"]
+                if queue.add(r, source="demande", front=True, targets=crit["targets"], batch=bid, save=False))
+    queue.save()
+    return {"added": added, "skipped": len(sel["releases"]) - added, "batch": bid}
 
 
 @app.post("/api/queue/rules")
@@ -167,7 +239,10 @@ async def queue_rules(body: dict | None = None):
     cands.sort(key=lambda r: (min(order.get(n, 99) for n in r["rules"]), r["count"], r["name"].lower()))
     if (body or {}).get("dry"):   # simple comptage, pour demander confirmation avant un gros ajout
         return {"added": 0, "matched": len(cands)}
-    added = sum(1 for r in cands if queue.add(r, source=only or r["rules"][0]))
+    bid = queue.new_batch(f"Règle {only}" if only else "Règles prioritaires", "règle",
+                          detail="trackers des groupes")
+    added = sum(1 for r in cands if queue.add(r, source=only or r["rules"][0], batch=bid, save=False))
+    queue.save()
     return {"added": added, "matched": len(cands)}
 
 
@@ -177,7 +252,10 @@ async def _run_scan(trigger: str) -> dict:
     data = await list_releases(refresh=True)
     settings = config.load_settings()
     todo, eligible, recent = scan.candidates(data["releases"], settings)
-    added = sum(1 for r in todo if queue.add(r, source="scan"))
+    bid = queue.new_batch("Scan planifié" + (" (lancé à la main)" if trigger == "manuel" else ""), "scan",
+                          detail="trackers des groupes")
+    added = sum(1 for r in todo if queue.add(r, source="scan", batch=bid, save=False))
+    queue.save()
     return scan.save_state(last_run=time.time(), last_trigger=trigger, last_added=added,
                            last_selected=len(todo), last_eligible=eligible, last_recent=recent, last_error=None)
 
@@ -265,6 +343,20 @@ async def queue_action(action: str):
     else:
         raise HTTPException(404, "Action inconnue")
     return {"paused": queue.paused}
+
+
+@app.get("/api/queue/batch/{bid}")
+async def queue_batch(bid: str):
+    if bid not in queue.batches:
+        raise HTTPException(404, "Demande inconnue")
+    return {"items": queue.batch_items(bid)}
+
+
+@app.delete("/api/queue/batch/{bid}")
+async def queue_batch_cancel(bid: str):
+    if bid not in queue.batches:
+        raise HTTPException(404, "Demande inconnue")
+    return {"removed": queue.cancel_batch(bid)}
 
 
 @app.delete("/api/queue/{item_id}")
