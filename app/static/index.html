@@ -94,7 +94,7 @@
           <button type="button" data-when="repeat" role="radio">Régulièrement</button>
         </div>
         <div class="repeat-form" id="s-repeat" hidden>
-          <label class="field">Toutes les<span><input type="number" id="s-every" min="1" max="720" value="24"> heures</span></label>
+          <label class="field">Tous les<span><input type="number" id="s-every-d" min="0" max="30" value="1" aria-label="Jours"> jours <input type="number" id="s-every-h" min="0" max="23" value="0" aria-label="Heures"> heures</span></label>
           <label class="field grow">Nom<input type="text" id="s-name" maxlength="80" autocomplete="off" placeholder="nom proposé d'après les critères"></label>
           <label class="check" id="s-now-wrap"><input type="checkbox" id="s-now" checked> Premier passage tout de suite</label>
         </div>

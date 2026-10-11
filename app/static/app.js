@@ -431,6 +431,7 @@ function routedResultHtml(r) {
   const parts = [];
   if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ${chips(r.injected)}`);
   if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection :</span> ${chips(r.failed)}`);
+  if ((r.matched || []).length) parts.push(`<span class="res-warn" title="cross-seed a répondu « correspondance trouvée », mais ses logs ne disent pas s'il l'a injectée ou s'il l'avait déjà">trouvé, non confirmé :</span> ${chips(r.matched)}`);
   if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
   if (!parts.length && !r.routed.length && seededOrPaused(r)) parts.push(`<span class="res-none">${(r.paused || []).length ? "Non cherchée : indexers en pause ou déjà en seed" : "Rien à chercher : déjà en seed sur tous les indexers routés"}</span>`);
   if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat${r.candidates > 1 ? "s" : ""} examiné${r.candidates > 1 ? "s" : ""}, aucun ne correspond` : "Rien trouvé"}</span>`);
@@ -661,7 +662,9 @@ function renderSearch() {
   const repeat = search.when === "repeat";
   $("#s-repeat").hidden = !repeat;
   $("#s-when-hint").hidden = !repeat;
-  $("#s-every").value = search.every;
+  const ev = +search.every || 24;
+  $("#s-every-d").value = Math.floor(ev / 24);
+  $("#s-every-h").value = ev % 24;
   $("#s-name").value = search.name;
   $("#s-now-wrap").hidden = !!state.editing;
   $("#s-now").disabled = !!state.readonly;
@@ -775,7 +778,14 @@ $("#s-when").addEventListener("click", (e) => {
   search.when = b.dataset.when;
   renderSearch();
 });
-$("#s-every").addEventListener("input", (e) => { search.every = e.target.value; previewSoon(); });
+// fréquence : jours + heures, gardée en heures (au moins 1 h)
+function readEvery() {
+  const d = Math.max(0, +$("#s-every-d").value || 0), h = Math.max(0, +$("#s-every-h").value || 0);
+  search.every = Math.min(720, Math.max(1, d * 24 + h));   // 1 h à 30 jours
+  previewSoon();
+}
+$("#s-every-d").addEventListener("input", readEvery);
+$("#s-every-h").addEventListener("input", readEvery);
 $("#s-name").addEventListener("input", (e) => { search.name = e.target.value; });
 $("#s-edit-cancel").addEventListener("click", () => endEdit(true));
 
@@ -1273,8 +1283,13 @@ $("#scan-xs-restart").addEventListener("click", async (e) => {
 
 // ---------- recherches programmées : Chercher › Programmées ----------
 const fmtWhen = (sec) => new Date(sec * 1000).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-const everyText = (h) => (h % 168 === 0 ? (h === 168 ? "toutes les semaines" : `toutes les ${h / 168} semaines`)
-  : h % 24 === 0 ? (h === 24 ? "tous les jours" : `tous les ${h / 24} jours`) : `toutes les ${h} h`);
+function everyText(h) {
+  if (h % 168 === 0) return h === 168 ? "toutes les semaines" : `toutes les ${h / 168} semaines`;
+  if (h % 24 === 0) return h === 24 ? "tous les jours" : `tous les ${h / 24} jours`;
+  if (h < 24) return `toutes les ${h} h`;
+  const d = Math.floor(h / 24);
+  return `tous les ${d} jour${d > 1 ? "s" : ""} ${h % 24} h`;
+}
 state.schedules = [];
 function scheduleHtml(s, readonly) {
   const last = s.last_run

@@ -504,7 +504,7 @@ table.rel td:nth-child(2) { min-width: 260px; }
 #c-seg { margin-bottom: 18px; }
 #c-seg b { font-weight: 500; font-size: 12px; color: var(--accent); }
 .repeat-form { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: flex-end; margin-top: 12px; }
-.repeat-form .field input[type=number] { width: 80px; }
+.repeat-form .field input[type=number] { width: 64px; }
 .repeat-form .field.grow { flex: 1 1 260px; max-width: 460px; }
 .repeat-form .field.grow input { width: 100%; }
 .repeat-form .check { padding-bottom: 6px; }

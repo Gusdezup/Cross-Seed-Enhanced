@@ -254,7 +254,7 @@ async def search(item: dict, keys: list) -> dict:
     local = _load_pauses()
     paused = {k: paused_until(infos[k], local) for k in keys if k in infos}
     paused = {k: v for k, v in paused.items() if v}
-    res = {"found": 0, "injected": [], "failed": [], "exists": [], "skipped": None, "refused": None,
+    res = {"found": 0, "injected": [], "failed": [], "exists": [], "matched": [], "skipped": None, "refused": None,
            "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys
                       if k not in paused and k not in set(item.get("skip") or [])],
            "seeded": [names.get(k, k) for k in keys if k in set(item.get("skip") or []) and k not in paused],
@@ -302,11 +302,23 @@ async def search(item: dict, keys: list) -> dict:
         except OSError:
             text = ""
         text = re.sub(r"\x1b\[[0-9;]*m", "", text)   # couleurs éventuelles
+        lines = text.splitlines()
         for title, tracker, status in sent:
-            if re.search(r"Already exists " + re.escape(title), text):
-                res["exists"].append(tracker)
-            elif status == 202 or re.search(r"Saved " + re.escape(title), text):
-                res["failed"].append(tracker)
-            else:
-                res["injected"].append(tracker)
+            res[classify(title, status, lines, text)].append(tracker)
     return res
+
+
+def classify(title: str, status: int, lines: list, text: str) -> str:
+    """Issue d'un résultat soumis à cross-seed, d'après ses logs. « injected » seulement si cross-seed
+    l'écrit (« … - injected ») : un HTTP 200 veut dire « correspondance trouvée », injectée ou déjà
+    présente, et ne suffit pas. Sans ligne reconnue : « matched » (trouvé, non confirmé)."""
+    own = re.compile(re.escape(title) + r"(?![\w.\-])")   # ce titre exactement, pas un titre plus long
+    mine = "\n".join(l for l in lines if own.search(l))
+    if re.search(r"-\s*injected\b", mine, re.I):
+        return "injected"
+    if re.search(r"already exists", mine, re.I) or re.search(r"Already exists " + re.escape(title), text):
+        return "exists"
+    if status == 202 or re.search(r"failed to inject|not complete|-\s*saved\b", mine, re.I) \
+            or re.search(r"Saved " + re.escape(title), text):
+        return "failed"
+    return "matched"
