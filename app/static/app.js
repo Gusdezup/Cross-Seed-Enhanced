@@ -455,8 +455,18 @@ function queueRow(i) {
       <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
       <td>${src}</td>
       <td>${resultHtml(i)}</td>
+      <td class="c-when">${queueWhen(i)}</td>
       <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
     </tr>`;
+}
+// Date de la recherche : fin si elle est terminée, départ si elle est en cours ; rien si elle attend encore
+function queueWhen(i) {
+  const at = i.done || i.sent;
+  if (!at || i.status === "pending") return "";
+  const d = new Date(at * 1000), today = new Date().toDateString() === d.toDateString();
+  const txt = today ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return `<span title="${esc(d.toLocaleString("fr-FR"))}">${i.status === "running" ? `depuis ${txt}` : txt}</span>`;
 }
 const sortQueue = (items) => {
   const order = { running: 0, pending: 1 };
@@ -486,8 +496,8 @@ function batchHtml(b, q) {
   const open = state.openBatches.has(b.id);
   const items = state.batchItems[b.id];
   const detail = !open ? "" : `<div class="b-items">${items ? `<div class="table-wrap"><table class="queue">
-      <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
-      <tbody>${sortQueue(items).map(queueRow).join("") || `<tr><td colspan="5" class="empty">Plus aucune recherche de cette demande dans la file.</td></tr>`}</tbody></table></div>`
+      <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th class="c-when">Date</th><th></th></tr></thead>
+      <tbody>${sortQueue(items).map(queueRow).join("") || `<tr><td colspan="6" class="empty">Plus aucune recherche de cette demande dans la file.</td></tr>`}</tbody></table></div>`
     : `<p class="muted">Chargement…</p>`}</div>`;
   return `<div class="batch${live ? "" : " finished"}" data-batch="${esc(b.id)}">
     <div class="b-head">
@@ -528,7 +538,7 @@ async function loadQueue() {
   const singles = sortQueue(q.items);
   $("#q-singles").hidden = !singles.length && q.batches.length > 0;
   $("#q-body").innerHTML = singles.length ? singles.map(queueRow).join("")
-    : `<tr><td colspan="5" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`;
+    : `<tr><td colspan="6" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`;
 }
 
 $("#q-batches").addEventListener("click", async (e) => {

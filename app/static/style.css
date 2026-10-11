@@ -389,7 +389,9 @@ a.btn.primary { background: var(--accent); border-color: var(--accent); color: #
   table.queue td { padding: 0; border: 0; }
   table.queue td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   table.queue td:nth-child(4) { grid-column: 1 / -1; grid-row: 3; font-size: 13px; }
-  table.queue td:nth-child(5) { grid-column: 3; grid-row: 1; width: auto; }
+  table.queue td.c-when { grid-column: 1 / -1; grid-row: 4; font-size: 12px; }
+  table.queue td.c-when:empty { display: none; }
+  table.queue td.c-act { grid-column: 3; grid-row: 1; width: auto; }
   table.queue td.empty { grid-column: 1 / -1; padding: 16px 0; }
   .queue-head .btns { width: 100%; }
 }
@@ -510,3 +512,6 @@ table.rel td:nth-child(2) { min-width: 260px; }
   padding: 10px 14px; margin-bottom: 14px; border: 1px solid var(--link); border-radius: 8px;
   background: color-mix(in srgb, var(--link) 10%, var(--surface)); }
 #prog-list .empty { padding: 20px 0; text-align: left; }
+
+/* file : date de la recherche */
+table.queue .c-when { width: 110px; white-space: nowrap; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
