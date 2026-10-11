@@ -133,6 +133,7 @@ class SearchQueue:
         if b and n:
             b["cancelled"] = time.time()
             b["total"] -= n
+            b["dropped"] = b.get("dropped", 0) + n
         self._finish_check(bid)
         self.save()
         return n

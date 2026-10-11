@@ -27,6 +27,7 @@
 <div class="shell">
   <nav class="rail" aria-label="Sections">
     <a href="#releases" data-tab="releases">Releases <b id="cnt-releases"></b></a>
+    <a href="#search" data-tab="search">Chercher</a>
     <a href="#queue" data-tab="queue">File de recherche <b id="cnt-queue"></b></a>
     <a href="#pending" data-tab="pending">Injections en attente <b id="cnt-pending"></b></a>
     <a href="#indexers" data-tab="indexers">Indexers <b id="cnt-indexers"></b></a>
@@ -58,7 +59,8 @@
       </div>
       <div class="selbar" id="rel-selbar" hidden>
         <span id="rel-selcount"></span>
-        <button class="primary" id="rel-search-sel">Chercher la sélection</button>
+        <button class="primary" id="rel-search-sel" title="Chercher sur les trackers du groupe de chaque release">Chercher la sélection</button>
+        <button class="ghost" id="rel-target-sel" title="Choisir les trackers vers lesquels chercher ces releases">Choisir les trackers…</button>
         <button class="ghost" id="rel-clear-sel">Désélectionner</button>
       </div>
       <p class="summary" id="rel-summary"></p>
@@ -88,6 +90,49 @@
       <button class="ghost more" id="rel-more" hidden>Afficher plus</button>
     </section>
 
+    <!-- CHERCHER -->
+    <section id="tab-search" class="tab" hidden>
+      <h2>Chercher</h2>
+      <p class="muted">Choisis des releases, puis les trackers vers lesquels les cross-seeder. Une release déjà en seed sur tous les trackers visés est laissée de côté.</p>
+
+      <div class="step">
+        <h3><span class="num">1</span>Quelles releases ?</h3>
+        <div class="chips" id="s-scope" role="group" aria-label="Releases"></div>
+        <details class="refine" id="s-refine">
+          <summary>Affiner <span id="s-refine-sum"></span></summary>
+          <div class="refine-grid">
+            <label class="field">Nom contient<input type="search" id="s-text" placeholder="ex. HDForever 1080p" autocomplete="off"></label>
+            <label class="field">Règle prioritaire<select id="s-rule"><option value="">Toutes les releases</option></select></label>
+            <label class="field">Déjà cherchées sur la cible
+              <select id="s-fresh">
+                <option value="all">Peu importe</option>
+                <option value="never">Jamais cherchées</option>
+                <option value="days">Pas cherchées depuis…</option>
+              </select>
+              <span id="s-days-wrap" hidden><input type="number" id="s-days" min="1" value="30"> jours</span>
+            </label>
+            <label class="field">En seed sur au plus<span><input type="number" id="s-maxseeds" min="0" placeholder="—"> trackers</span></label>
+            <label class="field">Au plus<span><input type="number" id="s-limit" min="0" placeholder="toutes"> releases</span></label>
+          </div>
+        </details>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">2</span>Vers quels trackers ?</h3>
+        <div class="chips" id="s-targets" role="group" aria-label="Trackers"></div>
+        <p class="hint" id="s-targets-hint"></p>
+      </div>
+
+      <div class="launch" id="s-launch">
+        <div class="launch-text">
+          <div id="s-summary" class="launch-sum">…</div>
+          <div id="s-why" class="launch-why"></div>
+        </div>
+        <button class="primary" id="s-go" disabled>Lancer</button>
+      </div>
+      <div id="s-examples" class="examples"></div>
+    </section>
+
     <!-- FILE -->
     <section id="tab-queue" class="tab" hidden>
       <div class="queue-head">
@@ -96,18 +141,21 @@
           <p class="muted" id="q-state"></p>
         </div>
         <div class="btns">
-          <select id="q-rule" aria-label="Règle prioritaire à mettre en file" title="Règle prioritaire dont les releases seront ajoutées à la file"><option value="">Règle : toutes</option></select>
-          <button class="primary" id="q-rules" title="Ajoute à la file les releases de la règle choisie. La file part toute seule, une recherche toutes les N secondes.">Ajouter à la file</button>
+          <a class="btn primary" href="#search">Nouvelle recherche</a>
           <button class="ghost" id="q-pause">Pause</button>
           <button class="ghost" id="q-clear-pending">Vider la file</button>
           <button class="ghost" id="q-clear-done">Effacer l'historique</button>
         </div>
       </div>
-      <div class="table-wrap">
-        <table class="queue">
-          <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
-          <tbody id="q-body"></tbody>
-        </table>
+      <div id="q-batches"></div>
+      <div id="q-singles">
+        <h3>Recherches unitaires</h3>
+        <div class="table-wrap">
+          <table class="queue">
+            <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
+            <tbody id="q-body"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -161,13 +209,14 @@
       <div id="rules"></div>
       <button class="ghost" id="rule-add">Ajouter une règle</button>
 
-      <h2>Routage par catégorie</h2>
-      <p class="muted">Pour une catégorie routée, chaque recherche de la file (bouton « Chercher » ou règle) n'interroge que les indexers cochés : l'interface les interroge elle-même, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Les autres catégories restent cherchées par cross-seed sur tous ses indexers. Le scan complet de cross-seed (sauf s'il est remplacé par le scan planifié ci-dessous), son RSS et son announce ne sont pas concernés. Une recherche routée n'entre pas dans l'historique de cross-seed : l'interface la note de son côté (colonne « Dernière recherche », scan planifié).</p>
-      <div id="routes"></div>
-      <button class="ghost" id="route-add">Ajouter un routage</button>
+      <h2>Groupes de trackers</h2>
+      <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible par défaut du bouton « Chercher » d'une release, des règles et du scan planifié, et un raccourci dans l'onglet Chercher. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
+      <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed (sauf s'il est remplacé par le scan planifié ci-dessous), son RSS et son announce ne sont pas concernés.</p>
+      <div id="groups"></div>
+      <button class="ghost" id="group-add">Ajouter un groupe</button>
 
       <h2>Scan planifié</h2>
-      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles des règles prioritaires d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Les catégories routées passent par leurs indexers. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
+      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles des règles prioritaires d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Chaque release est cherchée sur les trackers de son groupe. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
       <div class="scan-form">
         <label class="check"><input type="checkbox" id="scan-enabled"> Activer le scan planifié</label>
         <label class="field">Toutes les<span><input type="number" id="scan-every" min="1" max="720"> heures</span></label>
