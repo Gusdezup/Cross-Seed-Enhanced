@@ -395,7 +395,7 @@ a.btn.primary { background: var(--accent); border-color: var(--accent); color: #
 }
 @media (max-width: 860px) {
   .launch { margin-left: -14px; margin-right: -14px; border-radius: 0; border-left: 0; border-right: 0; flex-wrap: wrap; }
-  .launch button { flex: 1 1 100%; }
+  .launch > .launch-btns { flex: 1 1 100%; }
   .pchip { font-size: 15px; }
 }
 
@@ -475,3 +475,25 @@ table.rel td:nth-child(2) { min-width: 260px; }
 /* recherche par mot clé, toujours visible en tête de Chercher */
 .s-text { width: 100%; max-width: 560px; display: block; margin-bottom: 12px; padding: 9px 12px !important; font-size: 15px; }
 #scan-status { margin-top: 18px; }
+
+/* --- recherches programmées --- */
+.launch-btns { display: flex; gap: 8px; }
+.dlg { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); padding: 18px 20px;
+  width: min(520px, calc(100vw - 32px)); }
+.dlg::backdrop { background: rgba(0, 0, 0, .45); }
+.dlg h3 { margin: 0 0 6px; }
+.dlg .field { margin: 12px 0; }
+.dlg .field input[type=text] { width: 100%; }
+.dlg .field input[type=number] { width: 80px; }
+.dlg-btns { justify-content: flex-end; margin-top: 14px; }
+.scheds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 18px; }
+.sched { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface); padding: 10px 14px; min-width: 0; }
+.sched.off { border-left-color: var(--line); opacity: .75; }
+.sched .b-meta { margin-top: 4px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline dotted; font-size: inherit; }
+.sched-empty { margin: 0 0 16px; }
+#q-schedules h3 { margin-top: 0; }
+@media (max-width: 860px) {
+  .launch-btns { flex: 1 1 100%; }
+  .launch-btns button { flex: 1; }
+}

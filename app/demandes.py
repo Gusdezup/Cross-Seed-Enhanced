@@ -149,7 +149,7 @@ def label(crit: dict, active: dict) -> tuple:
     """(titre court, cibles lisibles) d'une demande, pour la file."""
     if crit["keys"]:
         return (f"Sélection de {len(crit['keys'])} release{'s' if len(crit['keys']) > 1 else ''}",
-                ", ".join(active.get(k, k) for k in crit["targets"]) if crit["targets"] else "trackers des groupes")
+                ", ".join(active.get(k, k) for k in crit["targets"]) if crit["targets"] else "selon le groupe")
     else:
         parts = [f"groupe {g}" for g in crit["groups"]] + \
                 [c if c else "sans catégorie" for c in crit["categories"]]
@@ -172,5 +172,5 @@ def label(crit: dict, active: dict) -> tuple:
         extra.append(f"pas cherchées depuis {crit['fresh']['days']} j")
     if extra:
         what += " · " + ", ".join(extra)
-    to = ", ".join(active.get(k, k) for k in crit["targets"]) if crit["targets"] else "trackers des groupes"
+    to = ", ".join(active.get(k, k) for k in crit["targets"]) if crit["targets"] else "selon le groupe"
     return what, to

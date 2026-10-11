@@ -90,7 +90,7 @@ function showSub(sub) {
   state.sub = sub;
   $$("#f-seg [data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === sub));
   for (const n of ["queue", "pending", "logs"]) $(`#sub-${n}`).hidden = n !== sub;
-  if (sub === "queue") loadQueue();
+  if (sub === "queue") { state.schedTick = 0; loadQueue(); }
   if (sub === "pending") loadPending();
   if (sub === "logs") startLogs(); else stopLogs();
 }
@@ -439,7 +439,7 @@ function routedResultHtml(r) {
 
 const QLBL = { pending: "en attente", running: "en cours", done: "terminée", error: "erreur", timeout: "sans réponse" };
 function queueRow(i) {
-  const src = i.source === "manuel" || i.source === "demande" || i.source === "scan" ? i.source : `<span class="tag rule">${esc(i.source)}</span>`;
+  const src = ["manuel", "demande", "scan", "programmée"].includes(i.source) ? i.source : `<span class="tag rule">${esc(i.source)}</span>`;
   return `<tr>
       <td><span class="st ${i.status}">${QLBL[i.status]}</span></td>
       <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
@@ -481,7 +481,7 @@ function batchHtml(b, q) {
     : `<p class="muted">Chargement…</p>`}</div>`;
   return `<div class="batch${live ? "" : " finished"}" data-batch="${esc(b.id)}">
     <div class="b-head">
-      <div class="b-title">${esc(b.label)} <span class="b-to">→ ${esc(b.detail || "trackers des groupes")}</span></div>
+      <div class="b-title">${esc(b.label)} <span class="b-to">→ ${esc(b.detail || "selon le groupe")}</span></div>
       <div class="btns">
         <button class="small ghost" data-bdetail>${open ? "Masquer" : "Détail"}</button>
         ${b.pending ? `<button class="small danger" data-bcancel>Annuler</button>` : ""}
@@ -501,6 +501,7 @@ async function loadQueue() {
     cnt.classList.toggle("hot", q.pending > 0);
   }
   if (state.tab !== "follow" || state.sub !== "queue") return;
+  if (!state.schedTick || Date.now() - state.schedTick > 15000) { state.schedTick = Date.now(); loadSchedules(); }
   $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
   let st;
   if (state.readonly) st = `Lecture seule : la file ne part pas, ${q.pending} recherche(s) en attente.`;
@@ -665,7 +666,7 @@ async function preview() {
   if (seq !== previewSeq) return;   // une saisie plus récente a relancé l'aperçu
   lastPreview = d;
   const n = d.count;
-  const to = search.mode === "manual" ? d.to : "le groupe de chaque release";
+  const to = search.mode === "manual" ? d.to : "selon le groupe";
   const what = state.selected.size ? `${n} release${n > 1 ? "s" : ""} cochée${n > 1 ? "s" : ""}` : `${n} release${n > 1 ? "s" : ""}`;
   $("#s-summary").innerHTML = n ? `<b>${what}</b> → ${esc(to)}` : `<b>Rien à chercher</b> → ${esc(to)}`;
   const why = [];
@@ -1162,58 +1163,20 @@ $("#group-add").addEventListener("click", () => {
   $("#groups .group:last-of-type [data-f=\"name\"]").focus();
 });
 
-// ---------- scan planifié ----------
-function scanForm() {
-  return { enabled: $("#scan-enabled").checked, every_hours: +$("#scan-every").value,
-    limit: +$("#scan-limit").value, recent_days: +$("#scan-recent").value };
-}
-const fmtWhen = (sec) => new Date(sec * 1000).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-function scanStatusText(info) {
-  const s = info.state || {}, sc = state.settings.scan, parts = [];
-  if (s.last_run) {
-    const how = s.last_trigger === "manuel" ? "lancé à la main" : "automatique";
-    if (s.last_error) parts.push(`Dernier passage (${how}) le ${fmtWhen(s.last_run)} : erreur, ${s.last_error}.`);
-    else parts.push(`Dernier passage (${how}) le ${fmtWhen(s.last_run)} : ${s.last_added} release(s) mise(s) en file sur ${s.last_eligible} éligible(s), ${s.last_recent} sautée(s) car cherchée(s) récemment.`);
-  } else parts.push("Aucun passage pour l'instant.");
-  if (info.readonly) parts.push("Lecture seule : le scan automatique ne se lance pas.");
-  else if (!sc.enabled) parts.push("Scan automatique désactivé.");
-  else if (info.next_run) parts.push(info.next_run * 1000 <= Date.now() ? "Prochain passage : dans la minute." : `Prochain passage : ${fmtWhen(info.next_run)}.`);
-  return parts.join(" ");
-}
+// ---------- scan complet de cross-seed (searchCadence) ----------
 function scanXsNote(info, pendingRestart) {
   const x = info.xs_cadence;
   $("#scan-replace").disabled = !x || state.configWrite === false;
   if (!x) return "searchCadence introuvable dans config.js : à modifier à la main.";
   $("#scan-replace").checked = x.disabled;
   const now = x.disabled ? "Dans config.js : searchCadence: null, le scan complet de cross-seed est coupé."
-    : `Dans config.js : searchCadence = ${x.value}, cross-seed fait son propre scan complet en plus de celui-ci.`;
+    : `Dans config.js : searchCadence = ${x.value}, cross-seed fait son propre scan complet.`;
   return pendingRestart ? `${now} Redémarrage de cross-seed nécessaire pour l'appliquer.` : now;
 }
 async function renderScan() {
-  const sc = state.settings.scan;
-  $("#scan-enabled").checked = sc.enabled;
-  $("#scan-every").value = sc.every_hours;
-  $("#scan-limit").value = sc.limit;
-  $("#scan-recent").value = sc.recent_days;
-  try {
-    const info = await api("/api/scan");
-    $("#scan-status").textContent = scanStatusText(info);
-    $("#scan-xs-note").textContent = scanXsNote(info, !$("#scan-xs-restart").hidden);
-  } catch (err) { $("#scan-status").textContent = err.message; }
+  try { $("#scan-xs-note").textContent = scanXsNote(await api("/api/scan"), !$("#scan-xs-restart").hidden); }
+  catch (err) { $("#scan-xs-note").textContent = err.message; }
 }
-["#scan-enabled", "#scan-every", "#scan-limit", "#scan-recent"].forEach((s) =>
-  $(s).addEventListener("input", () => { state.settingsDirty = true; }));
-$("#scan-run").addEventListener("click", async (e) => {
-  e.target.disabled = true;
-  if (state.settingsDirty && !(await saveSettings())) { e.target.disabled = false; return; }
-  try {
-    const info = await api("/api/scan/run", { method: "POST" });
-    toast(`${info.state.last_added} release(s) mise(s) en file`);
-    $("#scan-status").textContent = scanStatusText(info);
-    loadQueue();
-  } catch (err) { toast(err.message, true); }
-  e.target.disabled = false;
-});
 $("#scan-replace").addEventListener("change", async (e) => {
   const replace = e.target.checked;
   const msg = replace ? "Couper le scan complet de cross-seed (searchCadence: null dans config.js) ?\n\nUne sauvegarde de config.js est faite. Le RSS et l'announce ne changent pas."
@@ -1227,6 +1190,87 @@ $("#scan-replace").addEventListener("change", async (e) => {
 });
 $("#scan-xs-restart").addEventListener("click", async (e) => {
   if (await restartXs(e.target)) { e.target.hidden = true; renderScan(); }
+});
+
+// ---------- recherches programmées (bouton « Programmer… » de Chercher, liste dans Suivre) ----------
+const fmtWhen = (sec) => new Date(sec * 1000).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const everyText = (h) => (h % 168 === 0 ? `toutes les ${h / 168 > 1 ? `${h / 168} semaines` : "semaines"}`
+  : h % 24 === 0 ? (h === 24 ? "tous les jours" : `tous les ${h / 24} jours`) : `toutes les ${h} h`);
+function scheduleHtml(s, readonly) {
+  const last = s.last_run
+    ? (s.last_error ? `<span class="res-bad">Dernier passage le ${fmtWhen(s.last_run)} : ${esc(s.last_error)}</span>`
+      : `Dernier passage le ${fmtWhen(s.last_run)} : ${s.last_added ?? 0} mise${s.last_added > 1 ? "s" : ""} en file`)
+    : "Pas encore lancée";
+  const next = !s.enabled ? "en pause" : readonly ? "lecture seule : ne se lance pas" : `prochain passage ${fmtWhen(s.next_run)}`;
+  return `<div class="sched${s.enabled ? "" : " off"}" data-sched="${esc(s.id)}">
+    <div class="b-head">
+      <div class="b-title">${esc(s.name)} <span class="b-to">→ ${esc(s.to)}</span></div>
+      <div class="btns">
+        <button class="small ghost" data-srun ${readonly ? "disabled" : ""}>Lancer maintenant</button>
+        <button class="small ghost" data-stoggle>${s.enabled ? "Pause" : "Reprendre"}</button>
+        <button class="small danger" data-sdel>Supprimer</button>
+      </div>
+    </div>
+    <div class="b-meta">${esc(s.what)}</div>
+    <div class="b-meta"><button class="linkish" data-severy title="Changer la fréquence">${everyText(s.every_hours)}</button> · ${next}</div>
+    <div class="b-meta">${last}</div>
+  </div>`;
+}
+async function loadSchedules() {
+  let d;
+  try { d = await api("/api/schedules"); } catch { return; }
+  $("#q-schedules").innerHTML = d.items.length
+    ? `<h3>Recherches programmées</h3><div class="scheds">${d.items.map((s) => scheduleHtml(s, d.readonly)).join("")}</div>`
+    : `<p class="muted sched-empty">Aucune recherche programmée. Dans <a href="#search">Chercher</a>, « Programmer… » répète une recherche toutes les N heures.</p>`;
+}
+$("#q-schedules").addEventListener("click", async (e) => {
+  const card = e.target.closest("[data-sched]");
+  if (!card) return;
+  const id = card.dataset.sched, name = card.querySelector(".b-title").firstChild.textContent.trim();
+  try {
+    if (e.target.closest("[data-srun]")) {
+      await api(`/api/schedules/${id}/run`, { method: "POST" });
+      toast(`${name} : passage lancé`);
+      loadQueue();
+    } else if (e.target.closest("[data-stoggle]")) {
+      const on = card.classList.contains("off");
+      await api(`/api/schedules/${id}`, { method: "PATCH", body: { enabled: on } });
+    } else if (e.target.closest("[data-severy]")) {
+      const h = prompt(`${name}\n\nRépéter toutes les combien d'heures ? (24 = tous les jours, 168 = toutes les semaines)`);
+      if (!h) return;
+      await api(`/api/schedules/${id}`, { method: "PATCH", body: { every_hours: +h } });
+    } else if (e.target.closest("[data-sdel]")) {
+      if (!confirm(`Supprimer la recherche programmée « ${name} » ?\n\nLes recherches déjà en file ne sont pas retirées.`)) return;
+      await api(`/api/schedules/${id}`, { method: "DELETE" });
+    } else return;
+  } catch (err) { toast(err.message, true); }
+  loadSchedules();
+});
+
+// Bouton « Programmer… » de Chercher
+$("#s-prog").addEventListener("click", () => {
+  if (state.selected.size) { toast("Des releases cochées ne se programment pas : décoche-les et utilise des critères", true); return; }
+  if (search.mode === "manual" && !search.targets.length) { toast("Choisis au moins un tracker", true); return; }
+  const what = lastPreview ? lastPreview.label : "";
+  const to = search.mode === "manual" ? (lastPreview ? lastPreview.to : "") : "selon le groupe";
+  $("#prog-what").textContent = `${what} → ${to}`;
+  $("#prog-name").value = what.slice(0, 80);   // la cible s'affiche déjà à côté du nom
+  $("#prog-now").disabled = !!state.readonly;
+  $("#prog-now").checked = !state.readonly;
+  $("#prog-dlg").showModal();
+});
+$("#prog-dlg").addEventListener("close", async () => {
+  if ($("#prog-dlg").returnValue !== "ok") return;
+  try {
+    const crit = criteria();
+    delete crit.keys;
+    await api("/api/schedules", { method: "POST", body: { name: $("#prog-name").value, every_hours: +$("#prog-every").value || 24,
+      criteria: crit, run_now: $("#prog-now").checked } });
+    toast("Recherche programmée");
+    state.sub = "queue";
+    location.hash = "#follow";
+    window.scrollTo(0, 0);
+  } catch (err) { toast(err.message, true); }
 });
 
 function renderAliases() {
@@ -1442,7 +1486,7 @@ async function saveSettings() {
   try {
     state.settings = await api("/api/settings", {
       method: "PUT",
-      body: { delay: +$("#set-delay").value, rules: state.settings.rules, groups: state.settings.groups, scan: scanForm(), tracker_aliases: aliases },
+      body: { delay: +$("#set-delay").value, rules: state.settings.rules, groups: state.settings.groups, tracker_aliases: aliases },
     });
     state.settingsDirty = false;
     toast("Réglages enregistrés");

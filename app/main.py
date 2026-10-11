@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import clients, config, demandes, jackett, logs, prowlarr, releases, routing, scan, xsdb
+from . import clients, config, demandes, jackett, logs, prowlarr, releases, routing, scan, schedules, xsdb
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -183,7 +183,7 @@ async def search(body: dict):
         await list_releases()
     batch = None
     if len(keys) > 1:
-        batch = queue.new_batch(f"Sélection de {len(keys)} releases", "manuel", detail="trackers des groupes")
+        batch = queue.new_batch(f"Sélection de {len(keys)} releases", "manuel", detail="selon le groupe")
     added = 0
     for k in keys:
         r = releases.get(k)
@@ -240,60 +240,103 @@ async def queue_rules(body: dict | None = None):
     if (body or {}).get("dry"):   # simple comptage, pour demander confirmation avant un gros ajout
         return {"added": 0, "matched": len(cands)}
     bid = queue.new_batch(f"Règle {only}" if only else "Règles prioritaires", "règle",
-                          detail="trackers des groupes")
+                          detail="selon le groupe")
     added = sum(1 for r in cands if queue.add(r, source=only or r["rules"][0], batch=bid, save=False))
     queue.save()
     return {"added": added, "matched": len(cands)}
 
 
-# --- scan planifié -----------------------------------------------------------
+# --- recherches programmées ---------------------------------------------------
 
-async def _run_scan(trigger: str) -> dict:
-    data = await list_releases(refresh=True)
-    settings = config.load_settings()
-    todo, eligible, recent = scan.candidates(data["releases"], settings)
-    bid = queue.new_batch("Scan planifié" + (" (lancé à la main)" if trigger == "manuel" else ""), "scan",
-                          detail="trackers des groupes")
-    added = sum(1 for r in todo if queue.add(r, source="scan", batch=bid, save=False))
-    queue.save()
-    return scan.save_state(last_run=time.time(), last_trigger=trigger, last_added=added,
-                           last_selected=len(todo), last_eligible=eligible, last_recent=recent, last_error=None)
+async def _run_schedule(item: dict, trigger: str) -> dict:
+    """Un passage d'une recherche programmée : une demande dans la file, comme un lancement à la main."""
+    try:
+        crit, active, sel = await _demande({**item["criteria"], "refresh": True})
+        _, to = demandes.label(crit, active)
+        bid = queue.new_batch(item["name"] + (" (lancée à la main)" if trigger == "manuel" else ""), "programmée",
+                              targets=crit["targets"], detail=to)
+        added = sum(1 for r in sel["releases"]
+                    if queue.add(r, source="programmée", targets=crit["targets"], batch=bid, save=False))
+        queue.save()
+        return schedules.update(item["id"], {"last_run": time.time(), "last_added": added,
+                                             "last_matched": len(sel["releases"]), "last_error": None})
+    except Exception as e:  # noqa: BLE001
+        return schedules.update(item["id"], {"last_run": time.time(), "last_error": str(e)[:300]})
 
 
 async def _scan_loop():
-    """Lance le scan planifié à son heure (jamais en lecture seule)."""
+    """Lance les recherches programmées à leur heure (jamais en lecture seule)."""
     while True:
         await asyncio.sleep(60)
         if config.READONLY:
             continue
-        try:
-            if scan.due(config.load_settings()):
-                await _run_scan("auto")
-        except Exception as e:  # noqa: BLE001
-            scan.save_state(last_run=time.time(), last_trigger="auto", last_error=str(e)[:300])
+        for item in await asyncio.to_thread(schedules.due):
+            await _run_schedule(item, "auto")
 
+
+async def _schedule_view(item: dict, active: dict | None = None) -> dict:
+    if active is None:
+        active = await _active_indexers()
+    crit = demandes.normalize(item["criteria"])
+    what, to = demandes.label(crit, active)
+    return item | {"what": what, "to": to, "next_run": schedules.next_run(item)}
+
+
+@app.get("/api/schedules")
+async def list_schedules():
+    active = await _active_indexers()
+    items = await asyncio.to_thread(schedules.load)
+    return {"items": [await _schedule_view(i, active) for i in items], "readonly": config.READONLY}
+
+
+@app.post("/api/schedules")
+async def create_schedule(body: dict):
+    crit = body.get("criteria") if isinstance(body.get("criteria"), dict) else {}
+    try:
+        item = await asyncio.to_thread(schedules.create, body.get("name"), crit, body.get("every_hours"))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if body.get("run_now") and not config.READONLY:
+        item = await _run_schedule(item, "auto")
+    return await _schedule_view(item)
+
+
+@app.patch("/api/schedules/{sid}")
+async def patch_schedule(sid: str, body: dict):
+    try:
+        item = await asyncio.to_thread(schedules.update, sid, {k: v for k, v in body.items()
+                                                                 if k in ("enabled", "every_hours", "name")})
+    except KeyError as e:
+        raise HTTPException(404, "Recherche programmée inconnue") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return await _schedule_view(item)
+
+
+@app.delete("/api/schedules/{sid}")
+async def delete_schedule(sid: str):
+    return {"deleted": await asyncio.to_thread(schedules.delete, sid)}
+
+
+@app.post("/api/schedules/{sid}/run")
+async def run_schedule(sid: str):
+    config.guard("lancement d'une recherche programmée")
+    item = next((i for i in await asyncio.to_thread(schedules.load) if i["id"] == sid), None)
+    if not item:
+        raise HTTPException(404, "Recherche programmée inconnue")
+    return await _schedule_view(await _run_schedule(item, "manuel"))
+
+
+# --- scan complet de cross-seed (searchCadence) -----------------------------------
 
 def _scan_info() -> dict:
-    settings = config.load_settings()
-    state = scan.load_state()
     xs = xsdb.useful_settings().get("searchCadence")
-    return {"state": state, "next_run": scan.next_run(settings, state), "readonly": config.READONLY,
+    return {"readonly": config.READONLY,
             "xs_cadence": None if xs is None else {"value": xs["value"], "disabled": xs["kind"] == "empty"}}
 
 
 @app.get("/api/scan")
 async def get_scan():
-    return await asyncio.to_thread(_scan_info)
-
-
-@app.post("/api/scan/run")
-async def scan_run():
-    try:
-        await _run_scan("manuel")
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, str(e)) from e
     return await asyncio.to_thread(_scan_info)
 
 

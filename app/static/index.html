@@ -123,8 +123,25 @@
           <div id="s-summary" class="launch-sum">…</div>
           <div id="s-why" class="launch-why"></div>
         </div>
-        <button class="primary" id="s-go" disabled>Lancer</button>
+        <div class="launch-btns">
+          <button class="ghost" id="s-prog" title="Répéter cette recherche toutes les N heures">Programmer…</button>
+          <button class="primary" id="s-go" disabled>Lancer</button>
+        </div>
       </div>
+      <dialog id="prog-dlg" class="dlg">
+        <form method="dialog">
+          <h3>Programmer cette recherche</h3>
+          <p class="muted" id="prog-what"></p>
+          <label class="field">Nom<input type="text" id="prog-name" maxlength="80" autocomplete="off"></label>
+          <label class="field">Répéter toutes les<span><input type="number" id="prog-every" min="1" max="720" value="24"> heures</span></label>
+          <label class="check"><input type="checkbox" id="prog-now" checked> Lancer aussi maintenant</label>
+          <p class="hint">À chaque passage, les releases qui correspondent sont mises en file (celles déjà en seed sur la cible, ou déjà en file, sont sautées). Pour ne pas rechercher sans cesse les mêmes, utilise dans Affiner « Déjà cherchées sur la cible : pas cherchées depuis… ».</p>
+          <div class="btns dlg-btns">
+            <button value="cancel" class="ghost" formnovalidate>Annuler</button>
+            <button value="ok" class="primary" id="prog-ok">Programmer</button>
+          </div>
+        </form>
+      </dialog>
     </section>
 
     <!-- 2. SUIVRE L'AVANCEMENT -->
@@ -144,6 +161,7 @@
             <button class="ghost" id="q-clear-done">Effacer l'historique</button>
           </div>
         </div>
+        <div id="q-schedules"></div>
         <div id="q-batches"></div>
         <div id="q-singles">
           <h3>Recherches d'une seule release</h3>
@@ -190,30 +208,22 @@
     <!-- 3. RÉGLAGES -->
     <section id="tab-settings" class="tab" hidden>
       <nav class="toc" aria-label="Sections des réglages">
-        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-scan">Scan planifié</a>
+        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-rules">Passer en premier</a>
         <a href="#settings" data-goto="set-indexers">Indexers</a><a href="#settings" data-goto="sources-h">Sources</a><a href="#settings" data-goto="set-xs">cross-seed</a>
       </nav>
       <h2 id="set-groups">Groupes de trackers</h2>
-      <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible par défaut du bouton « Chercher » d'une release, des règles et du scan planifié, et un raccourci dans l'onglet Chercher. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
-      <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed (sauf s'il est remplacé par le scan planifié ci-dessous), son RSS et son announce ne sont pas concernés.</p>
+      <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible de « Selon le groupe » dans Chercher et du bouton « Chercher » d'une release. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
+      <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed, son RSS et son announce ne sont pas concernés.</p>
       <div id="groups"></div>
       <button class="ghost" id="group-add">Ajouter un groupe</button>
 
-      <h2 id="set-scan">Scan planifié</h2>
-      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles de « Passer en premier » d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Chaque release est cherchée sur les trackers de son groupe. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
-      <div class="scan-form">
-        <label class="check"><input type="checkbox" id="scan-enabled"> Activer le scan planifié</label>
-        <label class="field">Toutes les<span><input type="number" id="scan-every" min="1" max="720"> heures</span></label>
-        <label class="field">Au plus<span><input type="number" id="scan-limit" min="0"> releases par passage (0 : sans limite)</span></label>
-        <label class="field">Sauter les releases cherchées depuis moins de<span><input type="number" id="scan-recent" min="0"> jours</span></label>
-      </div>
-      <h3 id="set-rules">Passer en premier</h3>
-      <p class="muted">Releases servies avant les autres, dans l'ordre des lignes : par le scan planifié, et dans toute recherche lancée depuis Chercher. Exemple : groupe de release HDForever. Le nombre de releases concernées s'affiche pendant la saisie.</p>
+      <h2 id="set-rules">Passer en premier</h2>
+      <p class="muted">Releases servies avant les autres, dans l'ordre des lignes, dans toute recherche (lancée ou programmée). Exemple : groupe de release HDForever. Le nombre de releases concernées s'affiche pendant la saisie.</p>
       <div id="rules"></div>
       <button class="ghost" id="rule-add">Ajouter</button>
 
-      <p class="muted" id="scan-status"></p>
-      <div class="btns"><button class="ghost" id="scan-run">Lancer un passage maintenant</button></div>
+      <h2 id="set-scan">Scan complet de cross-seed</h2>
+      <p class="muted">cross-seed fait aussi son propre scan complet (searchCadence), sur tous ses indexers. Une recherche programmée (bouton « Programmer… » dans Chercher) peut le remplacer.</p>
       <div class="scan-xs">
         <label class="check"><input type="checkbox" id="scan-replace"> Remplacer le scan complet de cross-seed : <code>searchCadence: null</code> dans config.js (décocher rétablit l'ancienne valeur)</label>
         <p class="muted" id="scan-xs-note"></p>
