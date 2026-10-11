@@ -77,7 +77,7 @@ function showTab(name) {
   state.tab = tab;
   $$(".tab").forEach((t) => (t.hidden = t.id !== `tab-${tab}`));
   $$(".rail a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
-  if (tab === "search") renderSearch();
+  if (tab === "search") showCsub(state.csub || "new");
   if (tab === "follow") showSub(sub || state.sub);
   else stopLogs();
   if (tab === "settings") {
@@ -90,15 +90,25 @@ function showSub(sub) {
   state.sub = sub;
   $$("#f-seg [data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === sub));
   for (const n of ["queue", "pending", "logs"]) $(`#sub-${n}`).hidden = n !== sub;
-  if (sub === "queue") { state.schedTick = 0; loadQueue(); }
+  if (sub === "queue") loadQueue();
   if (sub === "pending") loadPending();
   if (sub === "logs") startLogs(); else stopLogs();
+}
+function showCsub(sub) {
+  state.csub = sub;
+  $$("#c-seg [data-csub]").forEach((b) => b.classList.toggle("on", b.dataset.csub === sub));
+  $("#csub-new").hidden = sub !== "new";
+  $("#csub-prog").hidden = sub !== "prog";
+  $("#c-seg").hidden = !!state.editing && sub === "new";   // pendant une modification : bandeau « Annuler » à la place
+  if (sub === "new") renderSearch(); else loadSchedules();
 }
 function goTo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 document.addEventListener("click", (e) => {
   const sub = e.target.closest("#f-seg [data-sub]");
   if (sub) showSub(sub.dataset.sub);
+  const csub = e.target.closest("#c-seg [data-csub]");
+  if (csub) showCsub(csub.dataset.csub);
   const g = e.target.closest("[data-goto]");
   if (g && state.tab === "settings") { e.preventDefault(); goTo(g.dataset.goto); }
   else if (g) state.pendingAnchor = g.dataset.goto;   // le lien mène à #settings, showTab défile ensuite
@@ -501,7 +511,6 @@ async function loadQueue() {
     cnt.classList.toggle("hot", q.pending > 0);
   }
   if (state.tab !== "follow" || state.sub !== "queue") return;
-  if (!state.schedTick || Date.now() - state.schedTick > 15000) { state.schedTick = Date.now(); loadSchedules(); }
   $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
   let st;
   if (state.readonly) st = `Lecture seule : la file ne part pas, ${q.pending} recherche(s) en attente.`;
@@ -569,7 +578,14 @@ const SEARCH_DEFAULT = { groups: [], categories: [], mode: "group", targets: [],
 const search = Object.assign({}, SEARCH_DEFAULT, prefGet("search", {}));
 if (!["group", "manual"].includes(search.mode)) search.mode = search.targets.length ? "manual" : "group";
 search.rule = "";   // critère retiré : les règles ne servent plus qu'à l'ordre de passage
-const saveSearch = () => prefSet("search", search);
+Object.assign(search, { when: "now", every: 24, name: "" });   // étape 3 : pas mémorisée d'une visite à l'autre
+// Modification d'une recherche programmée : { id, name, backup } (backup = critères de Chercher à restaurer)
+state.editing = null;
+const saveSearch = () => {
+  if (state.editing) return;   // pendant une modification, on ne touche pas aux choix mémorisés
+  const { when, every, name, ...rest } = search;
+  prefSet("search", rest);
+};
 const has = (arr, v) => arr.some((x) => lc(x) === lc(v));
 const toggle = (arr, v) => (has(arr, v) ? arr.filter((x) => lc(x) !== lc(v)) : [...arr, v]);
 
@@ -629,6 +645,18 @@ function renderSearch() {
     : groups.length
       ? `Un film part vers les trackers de son groupe, un album vers ceux du sien… Groupes définis dans <a href="#settings" data-goto="set-groups">Réglages</a>.`
       : `Aucun groupe défini : cross-seed cherche sur tous ses indexers. Crée tes groupes dans <a href="#settings" data-goto="set-groups">Réglages</a>.`;
+  // 3. quand
+  $$("#s-when [data-when]").forEach((b) => { const on = b.dataset.when === search.when; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
+  const repeat = search.when === "repeat";
+  $("#s-repeat").hidden = !repeat;
+  $("#s-when-hint").hidden = !repeat;
+  $("#s-every").value = search.every;
+  $("#s-name").value = search.name;
+  $("#s-now-wrap").hidden = !!state.editing;
+  $("#s-now").disabled = !!state.readonly;
+  if (state.readonly) $("#s-now").checked = false;
+  $("#s-editing").hidden = !state.editing;
+  if (state.editing) $("#s-editing-name").textContent = `« ${state.editing.name} »`;
   renderReleases();
   previewSoon(0);
 }
@@ -656,7 +684,7 @@ async function preview() {
   if (search.mode === "manual" && !search.targets.length) {
     $("#s-summary").innerHTML = "<b>Choisis au moins un tracker</b>";
     $("#s-why").textContent = "";
-    go.disabled = true; go.textContent = "Lancer";
+    go.disabled = true; go.textContent = goLabel(0);
     return;
   }
   go.disabled = true;
@@ -670,7 +698,8 @@ async function preview() {
   const what = state.selected.size ? `${n} release${n > 1 ? "s" : ""} cochée${n > 1 ? "s" : ""}` : `${n} release${n > 1 ? "s" : ""}`;
   $("#s-summary").innerHTML = n ? `<b>${what}</b> → ${esc(to)}` : `<b>Rien à chercher</b> → ${esc(to)}`;
   const why = [];
-  if (n) why.push(`environ ${fmtDuration(d.duration)}`);
+  if (search.when === "repeat") why.push(n ? `aujourd'hui ; puis ${everyText(+search.every || 24)}` : `rien aujourd'hui ; vérifié ${everyText(+search.every || 24)}`);
+  else if (n) why.push(`environ ${fmtDuration(d.duration)}`);
   if (d.matched > n) why.push(`${d.matched - n} de plus au-delà de la limite`);
   const c = d.counts;
   if (c.seeded) why.push(`${c.seeded} déjà en seed sur la cible`);
@@ -678,8 +707,15 @@ async function preview() {
   if (c.no_target) why.push(`${c.no_target} sans tracker cible`);
   if (c.xs) why.push(`${c.xs} sans groupe : cross-seed, tous ses indexers`);
   $("#s-why").textContent = why.join(" · ");
-  go.disabled = !n;
-  go.textContent = n ? `Lancer ${n} recherche${n > 1 ? "s" : ""}` : "Lancer";
+  const repeat = search.when === "repeat";
+  go.disabled = repeat ? state.selected.size > 0 : !n;
+  go.textContent = goLabel(n);
+  if (repeat && state.selected.size) $("#s-why").textContent = "Des releases cochées ne se programment pas : décoche-les et utilise des critères.";
+}
+function goLabel(n) {
+  if (state.editing) return "Enregistrer les modifications";
+  if (search.when === "repeat") return "Programmer";
+  return n ? `Lancer ${n} recherche${n > 1 ? "s" : ""}` : "Lancer";
 }
 
 function searchChanged() { state.limit = 200; saveSearch(); renderSearch(); }
@@ -722,7 +758,39 @@ $("#s-reset").addEventListener("click", () => {
   Object.assign(search, { rule: "", state: "", onTracker: "", fresh: "all", maxSeeds: "", limit: "" });
   searchChanged();
 });
+$("#s-when").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-when]");
+  if (!b || state.editing) return;   // une recherche programmée reste programmée
+  search.when = b.dataset.when;
+  renderSearch();
+});
+$("#s-every").addEventListener("input", (e) => { search.every = e.target.value; previewSoon(); });
+$("#s-name").addEventListener("input", (e) => { search.name = e.target.value; });
+$("#s-edit-cancel").addEventListener("click", () => endEdit(true));
+
+async function saveSchedule(btn) {
+  const crit = criteria();
+  delete crit.keys;
+  const what = lastPreview ? lastPreview.label : "";
+  const body = { name: search.name.trim() || what, every_hours: +search.every || 24, criteria: crit };
+  btn.disabled = true;
+  try {
+    if (state.editing) {
+      await api(`/api/schedules/${state.editing.id}`, { method: "PATCH", body });
+      toast("Recherche programmée modifiée");
+      endEdit(false);
+    } else {
+      await api("/api/schedules", { method: "POST", body: { ...body, run_now: $("#s-now").checked } });
+      toast($("#s-now").checked ? "Recherche programmée, premier passage lancé" : "Recherche programmée");
+      search.when = "now";
+    }
+    showCsub("prog");
+    window.scrollTo(0, 0);
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+}
 $("#s-go").addEventListener("click", async (e) => {
+  if (search.when === "repeat" || state.editing) { saveSchedule(e.target); return; }
   const n = lastPreview ? lastPreview.count : 0;
   if (n > 100 && !confirm(`Lancer ${n} recherches ?\n\nÀ une recherche toutes les ${lastPreview.delay} s, il faudra environ ${fmtDuration(lastPreview.duration)}. Tu pourras annuler depuis « Suivre l'avancement ».`)) return;
   e.target.disabled = true;
@@ -1192,86 +1260,87 @@ $("#scan-xs-restart").addEventListener("click", async (e) => {
   if (await restartXs(e.target)) { e.target.hidden = true; renderScan(); }
 });
 
-// ---------- recherches programmées (bouton « Programmer… » de Chercher, liste dans Suivre) ----------
+// ---------- recherches programmées : Chercher › Programmées ----------
 const fmtWhen = (sec) => new Date(sec * 1000).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-const everyText = (h) => (h % 168 === 0 ? `toutes les ${h / 168 > 1 ? `${h / 168} semaines` : "semaines"}`
+const everyText = (h) => (h % 168 === 0 ? (h === 168 ? "toutes les semaines" : `toutes les ${h / 168} semaines`)
   : h % 24 === 0 ? (h === 24 ? "tous les jours" : `tous les ${h / 24} jours`) : `toutes les ${h} h`);
+state.schedules = [];
 function scheduleHtml(s, readonly) {
   const last = s.last_run
     ? (s.last_error ? `<span class="res-bad">Dernier passage le ${fmtWhen(s.last_run)} : ${esc(s.last_error)}</span>`
-      : `Dernier passage le ${fmtWhen(s.last_run)} : ${s.last_added ?? 0} mise${s.last_added > 1 ? "s" : ""} en file`)
+      : `Dernier passage le ${fmtWhen(s.last_run)} : ${s.last_added ?? 0} mise${s.last_added > 1 ? "s" : ""} en file · <a href="#follow">voir l'avancement</a>`)
     : "Pas encore lancée";
   const next = !s.enabled ? "en pause" : readonly ? "lecture seule : ne se lance pas" : `prochain passage ${fmtWhen(s.next_run)}`;
   return `<div class="sched${s.enabled ? "" : " off"}" data-sched="${esc(s.id)}">
     <div class="b-head">
       <div class="b-title">${esc(s.name)} <span class="b-to">→ ${esc(s.to)}</span></div>
       <div class="btns">
+        <button class="small" data-sedit>Modifier</button>
         <button class="small ghost" data-srun ${readonly ? "disabled" : ""}>Lancer maintenant</button>
         <button class="small ghost" data-stoggle>${s.enabled ? "Pause" : "Reprendre"}</button>
         <button class="small danger" data-sdel>Supprimer</button>
       </div>
     </div>
     <div class="b-meta">${esc(s.what)}</div>
-    <div class="b-meta"><button class="linkish" data-severy title="Changer la fréquence">${everyText(s.every_hours)}</button> · ${next}</div>
+    <div class="b-meta">${everyText(s.every_hours)} · ${next}</div>
     <div class="b-meta">${last}</div>
   </div>`;
 }
 async function loadSchedules() {
   let d;
   try { d = await api("/api/schedules"); } catch { return; }
-  $("#q-schedules").innerHTML = d.items.length
-    ? `<h3>Recherches programmées</h3><div class="scheds">${d.items.map((s) => scheduleHtml(s, d.readonly)).join("")}</div>`
-    : `<p class="muted sched-empty">Aucune recherche programmée. Dans <a href="#search">Chercher</a>, « Programmer… » répète une recherche toutes les N heures.</p>`;
+  state.schedules = d.items;
+  const cnt = $("#cnt-prog");
+  cnt.textContent = d.items.length || "";
+  $("#prog-list").innerHTML = d.items.length
+    ? `<div class="scheds">${d.items.map((s) => scheduleHtml(s, d.readonly)).join("")}</div>`
+    : `<p class="empty">Aucune recherche programmée. Dans « Nouvelle recherche », choisis « Régulièrement » à l'étape 3.</p>`;
 }
-$("#q-schedules").addEventListener("click", async (e) => {
+$("#prog-list").addEventListener("click", async (e) => {
   const card = e.target.closest("[data-sched]");
   if (!card) return;
-  const id = card.dataset.sched, name = card.querySelector(".b-title").firstChild.textContent.trim();
+  const id = card.dataset.sched, s = state.schedules.find((x) => x.id === id);
+  if (!s) return;
   try {
+    if (e.target.closest("[data-sedit]")) { startEdit(s); return; }
     if (e.target.closest("[data-srun]")) {
       await api(`/api/schedules/${id}/run`, { method: "POST" });
-      toast(`${name} : passage lancé`);
+      toast(`${s.name} : passage lancé`);
       loadQueue();
     } else if (e.target.closest("[data-stoggle]")) {
-      const on = card.classList.contains("off");
-      await api(`/api/schedules/${id}`, { method: "PATCH", body: { enabled: on } });
-    } else if (e.target.closest("[data-severy]")) {
-      const h = prompt(`${name}\n\nRépéter toutes les combien d'heures ? (24 = tous les jours, 168 = toutes les semaines)`);
-      if (!h) return;
-      await api(`/api/schedules/${id}`, { method: "PATCH", body: { every_hours: +h } });
+      await api(`/api/schedules/${id}`, { method: "PATCH", body: { enabled: !s.enabled } });
     } else if (e.target.closest("[data-sdel]")) {
-      if (!confirm(`Supprimer la recherche programmée « ${name} » ?\n\nLes recherches déjà en file ne sont pas retirées.`)) return;
+      if (!confirm(`Supprimer la recherche programmée « ${s.name} » ?\n\nLes recherches déjà en file ne sont pas retirées.`)) return;
       await api(`/api/schedules/${id}`, { method: "DELETE" });
     } else return;
   } catch (err) { toast(err.message, true); }
   loadSchedules();
 });
 
-// Bouton « Programmer… » de Chercher
-$("#s-prog").addEventListener("click", () => {
-  if (state.selected.size) { toast("Des releases cochées ne se programment pas : décoche-les et utilise des critères", true); return; }
-  if (search.mode === "manual" && !search.targets.length) { toast("Choisis au moins un tracker", true); return; }
-  const what = lastPreview ? lastPreview.label : "";
-  const to = search.mode === "manual" ? (lastPreview ? lastPreview.to : "") : "selon le groupe";
-  $("#prog-what").textContent = `${what} → ${to}`;
-  $("#prog-name").value = what.slice(0, 80);   // la cible s'affiche déjà à côté du nom
-  $("#prog-now").disabled = !!state.readonly;
-  $("#prog-now").checked = !state.readonly;
-  $("#prog-dlg").showModal();
-});
-$("#prog-dlg").addEventListener("close", async () => {
-  if ($("#prog-dlg").returnValue !== "ok") return;
-  try {
-    const crit = criteria();
-    delete crit.keys;
-    await api("/api/schedules", { method: "POST", body: { name: $("#prog-name").value, every_hours: +$("#prog-every").value || 24,
-      criteria: crit, run_now: $("#prog-now").checked } });
-    toast("Recherche programmée");
-    state.sub = "queue";
-    location.hash = "#follow";
-    window.scrollTo(0, 0);
-  } catch (err) { toast(err.message, true); }
-});
+// « Modifier » : Nouvelle recherche pré-remplie avec les critères, la cible et la fréquence
+function startEdit(s) {
+  const c = s.criteria || {};
+  state.editing = { id: s.id, name: s.name, backup: JSON.parse(JSON.stringify(search)), selected: [...state.selected] };
+  state.selected.clear();
+  Object.assign(search, SEARCH_DEFAULT, {
+    groups: c.groups || [], categories: c.categories || [], text: c.text || "", state: c.state || "",
+    onTracker: c.on_tracker || "", fresh: (c.fresh && c.fresh.mode) || "all", days: (c.fresh && c.fresh.days) || 30,
+    maxSeeds: c.max_seeds ?? "", limit: c.limit ?? "",
+    mode: (c.targets || []).length ? "manual" : "group", targets: c.targets || [],
+    when: "repeat", every: s.every_hours, name: s.name,
+  });
+  showCsub("new");
+  window.scrollTo(0, 0);
+}
+function endEdit(restore) {
+  const ed = state.editing;
+  state.editing = null;
+  if (ed) {
+    Object.assign(search, ed.backup, { when: "now", name: "" });
+    ed.selected.forEach((k) => state.selected.add(k));
+  }
+  if (restore) showCsub("prog");
+}
 
 function renderAliases() {
   const aliases = state.settings.tracker_aliases || {};
@@ -1506,6 +1575,7 @@ loadReleases();
 loadQueue();
 loadPending();
 loadIndexers();
+loadSchedules();
 setInterval(loadHealth, 30000);
 setInterval(loadQueue, 3000);
 setInterval(() => { if (!document.hidden) loadPending(); }, 60000);

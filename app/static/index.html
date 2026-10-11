@@ -31,6 +31,21 @@
 
     <!-- 1. CHERCHER -->
     <section id="tab-search" class="tab">
+      <div class="seg big" id="c-seg" role="tablist" aria-label="Chercher">
+        <button type="button" data-csub="new" class="on">Nouvelle recherche</button>
+        <button type="button" data-csub="prog">Programmées <b id="cnt-prog"></b></button>
+      </div>
+
+      <div id="csub-prog" hidden>
+        <p class="muted">Recherches répétées automatiquement. Chaque passage met en file les releases qui correspondent ; le résultat se suit dans Suivre l'avancement.</p>
+        <div id="prog-list"></div>
+      </div>
+
+      <div id="csub-new">
+      <div class="edit-banner" id="s-editing" hidden>
+        <span>Modification de <b id="s-editing-name"></b> : ajuste les critères, puis enregistre.</span>
+        <button type="button" class="small ghost" id="s-edit-cancel">Annuler la modification</button>
+      </div>
       <div class="step">
         <h3><span class="num">1</span>Quelles releases ?</h3>
         <input type="search" id="s-text" class="s-text" placeholder="Mot clé dans le nom : HDForever, Remux, 1080p…" autocomplete="off" aria-label="Mot clé dans le nom">
@@ -70,6 +85,20 @@
         </div>
         <div class="chips" id="s-targets" role="group" aria-label="Trackers" hidden></div>
         <p class="hint" id="s-targets-hint"></p>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">3</span>Quand ?</h3>
+        <div class="seg big" id="s-when" role="radiogroup" aria-label="Quand">
+          <button type="button" data-when="now" role="radio">Maintenant</button>
+          <button type="button" data-when="repeat" role="radio">Régulièrement</button>
+        </div>
+        <div class="repeat-form" id="s-repeat" hidden>
+          <label class="field">Toutes les<span><input type="number" id="s-every" min="1" max="720" value="24"> heures</span></label>
+          <label class="field grow">Nom<input type="text" id="s-name" maxlength="80" autocomplete="off" placeholder="nom proposé d'après les critères"></label>
+          <label class="check" id="s-now-wrap"><input type="checkbox" id="s-now" checked> Premier passage tout de suite</label>
+        </div>
+        <p class="hint" id="s-when-hint" hidden>À chaque passage, les releases qui correspondent sont mises en file (déjà en seed sur la cible ou déjà en file : sautées). Pour ne pas rechercher sans cesse les mêmes, mets dans Affiner « Déjà cherchées sur la cible : pas cherchées depuis… ».</p>
       </div>
 
       <div class="step">
@@ -123,25 +152,9 @@
           <div id="s-summary" class="launch-sum">…</div>
           <div id="s-why" class="launch-why"></div>
         </div>
-        <div class="launch-btns">
-          <button class="ghost" id="s-prog" title="Répéter cette recherche toutes les N heures">Programmer…</button>
-          <button class="primary" id="s-go" disabled>Lancer</button>
-        </div>
+        <button class="primary" id="s-go" disabled>Lancer</button>
       </div>
-      <dialog id="prog-dlg" class="dlg">
-        <form method="dialog">
-          <h3>Programmer cette recherche</h3>
-          <p class="muted" id="prog-what"></p>
-          <label class="field">Nom<input type="text" id="prog-name" maxlength="80" autocomplete="off"></label>
-          <label class="field">Répéter toutes les<span><input type="number" id="prog-every" min="1" max="720" value="24"> heures</span></label>
-          <label class="check"><input type="checkbox" id="prog-now" checked> Lancer aussi maintenant</label>
-          <p class="hint">À chaque passage, les releases qui correspondent sont mises en file (celles déjà en seed sur la cible, ou déjà en file, sont sautées). Pour ne pas rechercher sans cesse les mêmes, utilise dans Affiner « Déjà cherchées sur la cible : pas cherchées depuis… ».</p>
-          <div class="btns dlg-btns">
-            <button value="cancel" class="ghost" formnovalidate>Annuler</button>
-            <button value="ok" class="primary" id="prog-ok">Programmer</button>
-          </div>
-        </form>
-      </dialog>
+      </div>
     </section>
 
     <!-- 2. SUIVRE L'AVANCEMENT -->
@@ -161,7 +174,6 @@
             <button class="ghost" id="q-clear-done">Effacer l'historique</button>
           </div>
         </div>
-        <div id="q-schedules"></div>
         <div id="q-batches"></div>
         <div id="q-singles">
           <h3>Recherches d'une seule release</h3>

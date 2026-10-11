@@ -305,7 +305,7 @@ async def create_schedule(body: dict):
 async def patch_schedule(sid: str, body: dict):
     try:
         item = await asyncio.to_thread(schedules.update, sid, {k: v for k, v in body.items()
-                                                                 if k in ("enabled", "every_hours", "name")})
+                                                                 if k in ("enabled", "every_hours", "name", "criteria")})
     except KeyError as e:
         raise HTTPException(404, "Recherche programmée inconnue") from e
     except ValueError as e:

@@ -88,6 +88,10 @@ def update(sid: str, changes: dict) -> dict:
         item["enabled"] = bool(changes["enabled"])
     if "every_hours" in changes:
         item["every_hours"] = _hours(changes["every_hours"])
+    if isinstance(changes.get("criteria"), dict):
+        if changes["criteria"].get("keys"):
+            raise ValueError("Une sélection de releases cochées ne se programme pas : utilise des critères")
+        item["criteria"] = changes["criteria"]
     if "name" in changes and str(changes["name"]).strip():
         item["name"] = str(changes["name"]).strip()[:80]
     for k in ("last_run", "last_added", "last_matched", "last_error"):

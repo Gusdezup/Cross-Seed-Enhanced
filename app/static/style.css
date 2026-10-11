@@ -395,7 +395,7 @@ a.btn.primary { background: var(--accent); border-color: var(--accent); color: #
 }
 @media (max-width: 860px) {
   .launch { margin-left: -14px; margin-right: -14px; border-radius: 0; border-left: 0; border-right: 0; flex-wrap: wrap; }
-  .launch > .launch-btns { flex: 1 1 100%; }
+  .launch > button { flex: 1 1 100%; }
   .pchip { font-size: 15px; }
 }
 
@@ -497,3 +497,16 @@ table.rel td:nth-child(2) { min-width: 260px; }
   .launch-btns { flex: 1 1 100%; }
   .launch-btns button { flex: 1; }
 }
+
+/* --- Chercher : sous-onglets, étape « Quand ? », modification d'une recherche programmée --- */
+#c-seg { margin-bottom: 18px; }
+#c-seg b { font-weight: 500; font-size: 12px; color: var(--accent); }
+.repeat-form { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: flex-end; margin-top: 12px; }
+.repeat-form .field input[type=number] { width: 80px; }
+.repeat-form .field.grow { flex: 1 1 260px; max-width: 460px; }
+.repeat-form .field.grow input { width: 100%; }
+.repeat-form .check { padding-bottom: 6px; }
+.edit-banner { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between;
+  padding: 10px 14px; margin-bottom: 14px; border: 1px solid var(--link); border-radius: 8px;
+  background: color-mix(in srgb, var(--link) 10%, var(--surface)); }
+#prog-list .empty { padding: 20px 0; text-align: left; }
