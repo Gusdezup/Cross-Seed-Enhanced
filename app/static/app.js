@@ -444,7 +444,8 @@ function routedResultHtml(r) {
   let meta = `${asked} indexer${asked > 1 ? "s" : ""}`;
   if (paused.length) meta += ` · ${paused.length} en pause`;
   if (r.errors.length) meta += ` · ⚠ ${r.errors.length}`;
-  return `<span class="res-line">${parts.join(" ")} <span class="res-meta" title="${esc(tip)}">${esc(meta)}</span></span>`;
+  // mention des indexers toujours sur sa propre ligne : même hauteur pour toutes les lignes
+  return `<div class="res-line">${parts.join(" ")}</div><div class="res-sub"><span class="res-meta" title="${esc(tip)}">${esc(meta)}</span></div>`;
 }
 
 const QLBL = { pending: "en attente", running: "en cours", done: "terminée", error: "erreur", timeout: "sans réponse" };

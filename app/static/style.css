@@ -515,3 +515,5 @@ table.rel td:nth-child(2) { min-width: 260px; }
 
 /* file : date de la recherche */
 table.queue .c-when { width: 110px; white-space: nowrap; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+.res-sub { margin-top: 2px; line-height: 1.3; }
