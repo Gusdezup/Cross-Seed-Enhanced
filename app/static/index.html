@@ -17,84 +17,20 @@
     <span class="pill" id="pill-qbit"><i></i>qBittorrent</span>
     <span class="pill" id="pill-xs"><i></i>cross-seed</span>
   </div>
-  <div class="jobs">
-    <button class="ghost" data-job="rss" title="Lancer le scan RSS de cross-seed maintenant">RSS</button>
-    <button class="ghost" data-job="search" title="Lancer le scan complet de tous les torrents (searchCadence)">Scan complet</button>
-    <button class="ghost" data-job="inject" title="Retenter maintenant les injections en attente">Injecter</button>
-  </div>
 </header>
 
 <div class="shell">
   <nav class="rail" aria-label="Sections">
-    <a href="#releases" data-tab="releases">Releases <b id="cnt-releases"></b></a>
-    <a href="#search" data-tab="search">Chercher</a>
-    <a href="#queue" data-tab="queue">File de recherche <b id="cnt-queue"></b></a>
-    <a href="#pending" data-tab="pending">Injections en attente <b id="cnt-pending"></b></a>
-    <a href="#indexers" data-tab="indexers">Indexers <b id="cnt-indexers"></b></a>
-    <a href="#logs" data-tab="logs">Logs</a>
-    <a href="#settings" data-tab="settings">Réglages</a>
+    <a href="#search" data-tab="search"><span><i class="n">1</i>Chercher</span> <b id="cnt-releases"></b></a>
+    <a href="#follow" data-tab="follow"><span><i class="n">2</i>Suivre<span class="long">&nbsp;l'avancement</span></span> <b id="cnt-queue"></b></a>
+    <a href="#settings" data-tab="settings"><span><i class="n">3</i>Réglages</span> <b id="cnt-indexers"></b></a>
   </nav>
 
   <main>
     <div class="ro-banner" id="ro-banner" hidden></div>
-    <!-- RELEASES -->
-    <section id="tab-releases" class="tab">
-      <div class="toolbar">
-        <input type="search" id="rel-q" placeholder="Filtrer par nom (ex. HDForever, 1080p, Remux…)" autocomplete="off">
-        <select id="rel-filter" aria-label="Filtre">
-          <option value="all">Toutes les releases</option>
-          <option value="rules">Prioritaires (règles)</option>
-          <option value="available">Cross-seed possible non injecté</option>
-          <option value="single">En seed sur un seul tracker</option>
-          <option value="noorig">Sans torrent d'origine</option>
-          <option value="dup">Plusieurs copies sur un même tracker</option>
-        </select>
-        <select id="rel-tracker" aria-label="Tracker"><option value="">Tous les trackers</option></select>
-        <select id="rel-cat" aria-label="Catégorie"><option value="">Toutes les catégories</option></select>
-        <details class="colpick" id="rel-cols">
-          <summary class="ghost">Colonnes</summary>
-          <div class="colpick-menu" id="rel-cols-menu"></div>
-        </details>
-        <button class="ghost" id="rel-refresh" title="Recharger depuis qBittorrent">Actualiser</button>
-      </div>
-      <div class="selbar" id="rel-selbar" hidden>
-        <span id="rel-selcount"></span>
-        <button class="primary" id="rel-search-sel" title="Chercher sur les trackers du groupe de chaque release">Chercher la sélection</button>
-        <button class="ghost" id="rel-target-sel" title="Choisir les trackers vers lesquels chercher ces releases">Choisir les trackers…</button>
-        <button class="ghost" id="rel-clear-sel">Désélectionner</button>
-      </div>
-      <p class="summary" id="rel-summary"></p>
-      <p class="legend" id="rel-legend">
-        <span>Colonne Trackers :</span>
-        <span class="item"><span class="tchip seed sample"><i>✓</i>Tracker</span> déjà en seed</span>
-        <span class="item"><span class="tchip available sample"><i>+</i>Tracker</span> trouvée par cross-seed, pas encore injectée</span>
-        <span class="item"><span class="tchip nomatch sample"><i>–</i>Tracker</span> cherchée, rien trouvé</span>
-        <span>La couleur identifie le tracker. Le détail d'une release (clic sur son nom) liste aussi les indexers jamais interrogés.</span>
-      </p>
-      <div class="table-wrap">
-        <table class="rel">
-          <thead><tr>
-            <th class="c-check"><input type="checkbox" id="rel-all" aria-label="Tout sélectionner"></th>
-            <th data-sort="name">Release</th>
-            <th class="c-rules" data-sort="rules" title="Règles prioritaires (Réglages) auxquelles la release correspond">Priorité</th>
-            <th class="c-cat" data-sort="category">Catégorie</th>
-            <th class="c-size" data-sort="size">Taille</th>
-            <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
-            <th class="c-last" data-sort="last" title="Dernière recherche cross-seed, tous indexers confondus">Dernière recherche</th>
-            <th class="c-copies" data-sort="seeds" title="État de la release sur chaque tracker ; tri par nombre de trackers en seed">Trackers</th>
-            <th class="c-act"></th>
-          </tr></thead>
-          <tbody id="rel-body"></tbody>
-        </table>
-      </div>
-      <button class="ghost more" id="rel-more" hidden>Afficher plus</button>
-    </section>
 
-    <!-- CHERCHER -->
-    <section id="tab-search" class="tab" hidden>
-      <h2>Chercher</h2>
-      <p class="muted">Choisis des releases, puis les trackers vers lesquels les cross-seeder. Une release déjà en seed sur tous les trackers visés est laissée de côté.</p>
-
+    <!-- 1. CHERCHER -->
+    <section id="tab-search" class="tab">
       <div class="step">
         <h3><span class="num">1</span>Quelles releases ?</h3>
         <div class="chips" id="s-scope" role="group" aria-label="Releases"></div>
@@ -102,7 +38,17 @@
           <summary>Affiner <span id="s-refine-sum"></span></summary>
           <div class="refine-grid">
             <label class="field">Nom contient<input type="search" id="s-text" placeholder="ex. HDForever 1080p" autocomplete="off"></label>
-            <label class="field">Règle prioritaire<select id="s-rule"><option value="">Toutes les releases</option></select></label>
+            <label class="field">Règle prioritaire<select id="s-rule"><option value="">Peu importe</option></select></label>
+            <label class="field">Présente sur le tracker<select id="s-ontracker"><option value="">Peu importe</option></select></label>
+            <label class="field">État
+              <select id="s-state">
+                <option value="">Peu importe</option>
+                <option value="available">Cross-seed trouvé, pas injecté</option>
+                <option value="noorig">Sans torrent d'origine</option>
+                <option value="dup">Plusieurs copies sur un même tracker</option>
+              </select>
+            </label>
+            <label class="field">En seed sur au plus<span><input type="number" id="s-maxseeds" min="0" placeholder="—"> trackers</span></label>
             <label class="field">Déjà cherchées sur la cible
               <select id="s-fresh">
                 <option value="all">Peu importe</option>
@@ -111,16 +57,68 @@
               </select>
               <span id="s-days-wrap" hidden><input type="number" id="s-days" min="1" value="30"> jours</span>
             </label>
-            <label class="field">En seed sur au plus<span><input type="number" id="s-maxseeds" min="0" placeholder="—"> trackers</span></label>
             <label class="field">Au plus<span><input type="number" id="s-limit" min="0" placeholder="toutes"> releases</span></label>
           </div>
+          <button type="button" class="small ghost" id="s-reset">Effacer les filtres</button>
         </details>
       </div>
 
       <div class="step">
         <h3><span class="num">2</span>Vers quels trackers ?</h3>
-        <div class="chips" id="s-targets" role="group" aria-label="Trackers"></div>
+        <div class="seg big" id="s-mode" role="radiogroup" aria-label="Cible">
+          <button type="button" data-mode="group" role="radio">Selon le groupe</button>
+          <button type="button" data-mode="manual" role="radio">Choisir les trackers</button>
+        </div>
+        <div class="chips" id="s-targets" role="group" aria-label="Trackers" hidden></div>
         <p class="hint" id="s-targets-hint"></p>
+      </div>
+
+      <div class="step">
+        <h3>Releases concernées</h3>
+        <div class="list-tools">
+          <span class="summary" id="rel-summary"></span>
+          <span class="btns">
+            <select id="rel-sort" aria-label="Trier par">
+              <option value="seeds">Trier : moins de trackers d'abord</option>
+              <option value="rules">Trier : prioritaires d'abord</option>
+              <option value="name">Trier : nom</option>
+              <option value="added">Trier : ajoutées récemment</option>
+              <option value="last">Trier : cherchées il y a longtemps</option>
+              <option value="size">Trier : taille</option>
+            </select>
+            <details class="colpick" id="rel-cols">
+              <summary class="ghost">Colonnes</summary>
+              <div class="colpick-menu" id="rel-cols-menu"></div>
+            </details>
+            <button class="ghost" id="rel-refresh" title="Recharger depuis qBittorrent">Actualiser</button>
+          </span>
+        </div>
+        <div class="selbar" id="rel-selbar" hidden>
+          <span id="rel-selcount"></span>
+          <button class="ghost small" id="rel-clear-sel">Tout décocher</button>
+        </div>
+        <p class="legend" id="rel-legend">
+          <span class="item"><span class="tchip seed sample"><i>✓</i>Tracker</span> déjà en seed</span>
+          <span class="item"><span class="tchip available sample"><i>+</i>Tracker</span> trouvée, pas encore injectée</span>
+          <span class="item"><span class="tchip nomatch sample"><i>–</i>Tracker</span> cherchée, rien trouvé</span>
+        </p>
+        <div class="table-wrap">
+          <table class="rel">
+            <thead><tr>
+              <th class="c-check"><input type="checkbox" id="rel-all" aria-label="Tout cocher"></th>
+              <th data-sort="name">Release</th>
+              <th class="c-rules" data-sort="rules" title="Règles prioritaires (Réglages) auxquelles la release correspond">Priorité</th>
+              <th class="c-cat" data-sort="category">Catégorie</th>
+              <th class="c-size" data-sort="size">Taille</th>
+              <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
+              <th class="c-last" data-sort="last" title="Dernière recherche, tous trackers confondus">Dernière recherche</th>
+              <th class="c-copies" data-sort="seeds" title="État de la release sur chaque tracker ; tri par nombre de trackers en seed">Trackers</th>
+              <th class="c-act"></th>
+            </tr></thead>
+            <tbody id="rel-body"></tbody>
+          </table>
+        </div>
+        <button class="ghost more" id="rel-more" hidden>Afficher plus</button>
       </div>
 
       <div class="launch" id="s-launch">
@@ -130,92 +128,86 @@
         </div>
         <button class="primary" id="s-go" disabled>Lancer</button>
       </div>
-      <div id="s-examples" class="examples"></div>
     </section>
 
-    <!-- FILE -->
-    <section id="tab-queue" class="tab" hidden>
-      <div class="queue-head">
-        <div>
-          <h2>File de recherche</h2>
+    <!-- 2. SUIVRE L'AVANCEMENT -->
+    <section id="tab-follow" class="tab" hidden>
+      <div class="seg big" id="f-seg" role="tablist" aria-label="Suivre">
+        <button type="button" data-sub="queue" class="on">Recherches <b id="cnt-queue2"></b></button>
+        <button type="button" data-sub="pending">Injections en attente <b id="cnt-pending"></b></button>
+        <button type="button" data-sub="logs">Logs</button>
+      </div>
+
+      <div id="sub-queue">
+        <div class="queue-head">
           <p class="muted" id="q-state"></p>
+          <div class="btns">
+            <button class="ghost" id="q-pause">Pause</button>
+            <button class="ghost" id="q-clear-pending">Vider la file</button>
+            <button class="ghost" id="q-clear-done">Effacer l'historique</button>
+          </div>
         </div>
-        <div class="btns">
-          <a class="btn primary" href="#search">Nouvelle recherche</a>
-          <button class="ghost" id="q-pause">Pause</button>
-          <button class="ghost" id="q-clear-pending">Vider la file</button>
-          <button class="ghost" id="q-clear-done">Effacer l'historique</button>
+        <div id="q-batches"></div>
+        <div id="q-singles">
+          <h3>Recherches d'une seule release</h3>
+          <div class="table-wrap">
+            <table class="queue">
+              <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
+              <tbody id="q-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="xs-jobs">
+          <h3>Lancer une tâche de cross-seed</h3>
+          <div class="btns">
+            <button class="ghost" data-job="rss" title="Lancer le scan RSS de cross-seed maintenant">Scan RSS</button>
+            <button class="ghost" data-job="search" title="Lancer le scan complet de tous les torrents (searchCadence)">Scan complet</button>
+          </div>
         </div>
       </div>
-      <div id="q-batches"></div>
-      <div id="q-singles">
-        <h3>Recherches unitaires</h3>
-        <div class="table-wrap">
-          <table class="queue">
-            <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th></th></tr></thead>
-            <tbody id="q-body"></tbody>
-          </table>
+
+      <div id="sub-pending" hidden>
+        <div class="queue-head">
+          <p class="muted">Torrents trouvés par cross-seed mais que qBittorrent a refusés. cross-seed les retente toutes les heures ; « Retenter maintenant » le fait tout de suite.</p>
+          <div class="btns"><button class="ghost" data-job="inject">Retenter maintenant</button></div>
         </div>
+        <div id="pending-list"></div>
+      </div>
+
+      <div id="sub-logs" hidden>
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="Niveau">
+            <button data-kind="info" class="on">Info</button>
+            <button data-kind="verbose">Détaillé</button>
+            <button data-kind="error">Erreurs</button>
+          </div>
+          <label class="check"><input type="checkbox" id="log-success"> Injections réussies seulement</label>
+          <input type="search" id="log-q" placeholder="Filtrer le texte…" autocomplete="off">
+          <label class="check"><input type="checkbox" id="log-follow" checked> Suivre</label>
+          <button class="ghost" id="log-clear">Vider l'affichage</button>
+        </div>
+        <div class="logview" id="logview" aria-live="off"></div>
       </div>
     </section>
 
-    <!-- PENDING -->
-    <section id="tab-pending" class="tab" hidden>
-      <div class="queue-head">
-        <div>
-          <h2>Injections en attente</h2>
-          <p class="muted">Torrents trouvés par cross-seed mais que qBittorrent a refusés. cross-seed les retente toutes les heures ; « Injecter » les retente tout de suite.</p>
-        </div>
-        <div class="btns"><button class="ghost" data-job="inject">Retenter maintenant</button></div>
-      </div>
-      <div id="pending-list"></div>
-    </section>
-
-    <!-- INDEXERS -->
-    <section id="tab-indexers" class="tab" hidden>
-      <div class="queue-head">
-        <div>
-          <h2>Indexers</h2>
-          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
-        </div>
-        <div class="btns">
-          <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
-          <button class="primary" id="idx-restart" hidden>Redémarrer cross-seed pour appliquer</button>
-        </div>
-      </div>
-      <div id="idx-list"></div>
-    </section>
-
-    <!-- LOGS -->
-    <section id="tab-logs" class="tab" hidden>
-      <div class="toolbar">
-        <div class="seg" role="group" aria-label="Niveau">
-          <button data-kind="info" class="on">Info</button>
-          <button data-kind="verbose">Détaillé</button>
-          <button data-kind="error">Erreurs</button>
-        </div>
-        <label class="check"><input type="checkbox" id="log-success"> Injections réussies seulement</label>
-        <input type="search" id="log-q" placeholder="Filtrer le texte…" autocomplete="off">
-        <label class="check"><input type="checkbox" id="log-follow" checked> Suivre</label>
-        <button class="ghost" id="log-clear">Vider l'affichage</button>
-      </div>
-      <div class="logview" id="logview" aria-live="off"></div>
-    </section>
-
-    <!-- SETTINGS -->
+    <!-- 3. RÉGLAGES -->
     <section id="tab-settings" class="tab" hidden>
-      <h2>Règles prioritaires</h2>
-      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active, ou, pour une règle « Catégorie », si elle est dans cette catégorie qBittorrent (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
-      <div id="rules"></div>
-      <button class="ghost" id="rule-add">Ajouter une règle</button>
-
-      <h2>Groupes de trackers</h2>
+      <nav class="toc" aria-label="Sections des réglages">
+        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-rules">Règles</a><a href="#settings" data-goto="set-scan">Scan planifié</a>
+        <a href="#settings" data-goto="set-indexers">Indexers</a><a href="#settings" data-goto="sources-h">Sources</a><a href="#settings" data-goto="set-xs">cross-seed</a>
+      </nav>
+      <h2 id="set-groups">Groupes de trackers</h2>
       <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible par défaut du bouton « Chercher » d'une release, des règles et du scan planifié, et un raccourci dans l'onglet Chercher. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
       <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed (sauf s'il est remplacé par le scan planifié ci-dessous), son RSS et son announce ne sont pas concernés.</p>
       <div id="groups"></div>
       <button class="ghost" id="group-add">Ajouter un groupe</button>
 
-      <h2>Scan planifié</h2>
+      <h2 id="set-rules">Règles prioritaires</h2>
+      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active, ou, pour une règle « Catégorie », si elle est dans cette catégorie qBittorrent (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
+      <div id="rules"></div>
+      <button class="ghost" id="rule-add">Ajouter une règle</button>
+
+      <h2 id="set-scan">Scan planifié</h2>
       <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles des règles prioritaires d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Chaque release est cherchée sur les trackers de son groupe. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
       <div class="scan-form">
         <label class="check"><input type="checkbox" id="scan-enabled"> Activer le scan planifié</label>
@@ -242,12 +234,24 @@
 
       <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>
 
+      <div class="queue-head" id="set-indexers">
+        <div>
+          <h2>Indexers</h2>
+          <p class="muted">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
+        </div>
+        <div class="btns">
+          <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
+          <button class="primary" id="idx-restart" hidden>Redémarrer cross-seed pour appliquer</button>
+        </div>
+      </div>
+      <div id="idx-list"></div>
+
       <h2 id="sources-h">Sources d'indexers</h2>
       <p class="muted">Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à saisir si tes lignes torznab pointent déjà vers eux : l'adresse et la clé en sont déduites. Sinon, renseigne-les ici. L'adresse est écrite telle quelle dans config.js : elle doit être joignable par cross-seed comme par cette interface. Une valeur définie dans le .env reste prioritaire.</p>
       <div class="sources" id="sources"></div>
       <div class="savebar"><button class="primary" id="src-save">Enregistrer les sources</button></div>
 
-      <h2>cross-seed</h2>
+      <h2 id="set-xs">cross-seed</h2>
       <p class="muted">Réglages de config.js. Seule la valeur de chaque ligne est modifiée (commentaires conservés) et une copie de sauvegarde est faite dans data/backups. cross-seed ne les prend en compte qu'après un redémarrage.</p>
       <p class="muted">Durées : un nombre suivi d'une unité en anglais, par exemple 30 minutes, 2 hours, 7 days, 2 weeks (abréviations m, h, d, w acceptées ; pas de mois). Les valeurs sont vérifiées avec les mêmes règles que cross-seed 6.13 avant d'être enregistrées.</p>
       <div class="xsform" id="xs-form"></div>

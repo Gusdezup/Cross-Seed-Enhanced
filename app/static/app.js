@@ -63,24 +63,46 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
-  settings: null, queue: null, tab: "releases", indexers: [], openBatches: new Set(), batchItems: {},
+  settings: null, queue: null, tab: "search", sub: "queue", indexers: [], openBatches: new Set(), batchItems: {},
 };
 
 // ---------- onglets ----------
+// Trois pages : 1 Chercher, 2 Suivre l'avancement (recherches, injections en attente, logs), 3 Réglages.
+// Les anciennes adresses (#releases, #queue, #pending, #logs, #indexers) mènent au bon endroit.
+const OLD_TABS = { releases: ["search"], queue: ["follow", "queue"], pending: ["follow", "pending"],
+  logs: ["follow", "logs"], indexers: ["settings", null, "set-indexers"] };
 function showTab(name) {
-  if (!$(`#tab-${name}`)) name = "releases";
-  state.tab = name;
-  $$(".tab").forEach((t) => (t.hidden = t.id !== `tab-${name}`));
-  $$(".rail a").forEach((a) => a.classList.toggle("on", a.dataset.tab === name));
-  if (name === "queue") loadQueue();
-  if (name === "search") renderSearch();
-  if (name === "pending") loadPending();
-  if (name === "indexers") loadIndexers();
-  if (name === "logs") startLogs();
-  if (name === "settings") renderSettings();
-  if (name !== "logs") stopLogs();
+  let [tab, sub, anchor] = OLD_TABS[name] || [name];
+  if (!$(`#tab-${tab}`)) tab = "search";
+  state.tab = tab;
+  $$(".tab").forEach((t) => (t.hidden = t.id !== `tab-${tab}`));
+  $$(".rail a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
+  if (tab === "search") renderSearch();
+  if (tab === "follow") showSub(sub || state.sub);
+  else stopLogs();
+  if (tab === "settings") {
+    anchor = anchor || state.pendingAnchor;
+    state.pendingAnchor = null;
+    renderSettings().then(() => anchor && setTimeout(() => goTo(anchor), 80));
+  }
 }
+function showSub(sub) {
+  state.sub = sub;
+  $$("#f-seg [data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === sub));
+  for (const n of ["queue", "pending", "logs"]) $(`#sub-${n}`).hidden = n !== sub;
+  if (sub === "queue") loadQueue();
+  if (sub === "pending") loadPending();
+  if (sub === "logs") startLogs(); else stopLogs();
+}
+function goTo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+document.addEventListener("click", (e) => {
+  const sub = e.target.closest("#f-seg [data-sub]");
+  if (sub) showSub(sub.dataset.sub);
+  const g = e.target.closest("[data-goto]");
+  if (g && state.tab === "settings") { e.preventDefault(); goTo(g.dataset.goto); }
+  else if (g) state.pendingAnchor = g.dataset.goto;   // le lien mène à #settings, showTab défile ensuite
+});
 
 // ---------- santé ----------
 async function loadHealth() {
@@ -154,6 +176,8 @@ function applyRelColumns() {
   for (const [k] of REL_COLS) t.classList.toggle(`hide-${k}`, state.relHidden.has(k));
   $("#rel-cols-menu").innerHTML = REL_COLS.map(([k, label]) =>
     `<label><input type="checkbox" data-col="${k}" ${state.relHidden.has(k) ? "" : "checked"}> ${esc(label)}</label>`).join("");
+  const rs = $("#rel-sort");
+  if ([...rs.options].some((o) => o.value === state.relSort.key)) rs.value = state.relSort.key;
   for (const th of $$("table.rel th[data-sort]")) {
     const on = th.dataset.sort === state.relSort.key;
     th.classList.toggle("sorted", on);
@@ -168,45 +192,35 @@ async function loadReleases(refresh = false) {
     state.trackers = d.trackers;
     state.torrents = d.torrents;
     state.indexers = d.indexers || [];
-    const sel = $("#rel-tracker"), cur = sel.value;
-    const labels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
-    sel.innerHTML = `<option value="">Tous les trackers</option>` + labels.map((l) => `<option>${esc(l)}</option>`).join("");
-    sel.value = labels.includes(cur) ? cur : "";
-    const csel = $("#rel-cat"), ccur = csel.value;
-    const cats = [...new Set(d.releases.map((r) => r.category))].sort((a, b) => a.localeCompare(b));
-    csel.innerHTML = `<option value="">Toutes les catégories</option>` +
-      cats.map((c) => `<option value="${esc(c)}">${c ? esc(c) : "(sans catégorie)"}</option>`).join("");
-    csel.value = cats.includes(ccur) ? ccur : "";
+    state.trackerLabels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
     for (const k of [...state.selected]) if (!state.releases.some((r) => r.key === k)) state.selected.delete(k);
     $("#cnt-releases").textContent = d.releases.length;
-    renderReleases();
     if (state.tab === "settings" && state.settings) { renderRules(); renderGroups(); renderAliases(); }
-    if (state.tab === "search") renderSearch();
+    renderSearch();
   } catch (err) {
     $("#rel-summary").textContent = err.message;
     $("#rel-body").innerHTML = `<tr><td colspan="99" class="empty">${esc(err.message)}. Vérifie QBT_URL et QBT_APIKEY.</td></tr>`;
   }
 }
 
+// Releases correspondant aux critères de l'étape 1 (mêmes règles que demandes.py côté serveur)
+function matchesSearch(r) {
+  if (search.groups.length || search.categories.length) {
+    const g = search.groups.length ? groupFor(r.category, (state.settings && state.settings.groups) || []) : null;
+    if (!has(search.categories, r.category || "") && !(g && has(search.groups, g.name))) return false;
+  }
+  const terms = search.text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length && !terms.every((t) => r.name.toLowerCase().includes(t))) return false;
+  if (search.rule && !r.rules.includes(search.rule)) return false;
+  if (search.maxSeeds !== "" && r.seeds > +search.maxSeeds) return false;
+  if (search.state === "available" && !r.available) return false;
+  if (search.state === "noorig" && r.has_original) return false;
+  if (search.state === "dup" && new Set(r.copies.map((c) => c.tracker)).size === r.copies.length) return false;
+  if (search.onTracker && !r.copies.some((c) => c.tracker === search.onTracker)) return false;
+  return true;
+}
 function filteredReleases() {
-  const q = $("#rel-q").value.trim().toLowerCase();
-  const f = $("#rel-filter").value, tr = $("#rel-tracker").value, cat = $("#rel-cat").value;
-  const catOn = $("#rel-cat").selectedIndex > 0;
-  const terms = q.split(/\s+/).filter(Boolean);
-  let list = state.releases.filter((r) => {
-    if (f === "rules" && !r.rules.length) return false;
-    if (f === "single" && r.seeds !== 1) return false;
-    if (f === "available" && !r.available) return false;
-    if (f === "noorig" && r.has_original) return false;
-    if (f === "dup" && new Set(r.copies.map((c) => c.tracker)).size === r.copies.length) return false;
-    if (tr && !r.copies.some((c) => c.tracker === tr)) return false;
-    if (catOn && r.category !== cat) return false;
-    if (terms.length) {
-      const hay = (r.name + " " + r.copies.map((c) => c.tracker).join(" ")).toLowerCase();
-      if (!terms.every((t) => hay.includes(t))) return false;
-    }
-    return true;
-  });
+  const list = state.releases.filter(matchesSearch);
   const { key, dir } = state.relSort;
   const val = {
     name: (r) => r.name.toLowerCase(),
@@ -253,12 +267,11 @@ function renderReleases() {
   const list = filteredReleases();
   const shown = list.slice(0, state.limit);
   const ruleCount = state.releases.filter((r) => r.rules.length).length;
-  $("#rel-summary").textContent =
-    `${list.length} release${list.length > 1 ? "s" : ""} affichée${list.length > 1 ? "s" : ""} sur ${state.releases.length} ` +
-    `(${state.torrents} torrents terminés, ${ruleCount} prioritaires).`;
+  $("#rel-summary").textContent = `${list.length} sur ${state.releases.length} releases ` +
+    `(${state.torrents} torrents terminés, ${ruleCount} prioritaires)`;
   const body = $("#rel-body");
   if (!shown.length) {
-    body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ce filtre.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ces critères.</td></tr>`;
   } else {
     body.innerHTML = shown.map((r) => {
       const flag = r.mode === "path"
@@ -309,7 +322,7 @@ function detailRow(r) {
 function updateSelbar() {
   const n = state.selected.size;
   $("#rel-selbar").hidden = n === 0;
-  $("#rel-selcount").textContent = `${n} release${n > 1 ? "s" : ""} sélectionnée${n > 1 ? "s" : ""}`;
+  $("#rel-selcount").textContent = `${n} release${n > 1 ? "s" : ""} cochée${n > 1 ? "s" : ""} : seules celles-ci seront cherchées`;
 }
 
 async function enqueue(keys) {
@@ -328,6 +341,7 @@ $("#rel-body").addEventListener("click", (e) => {
   if (e.target.matches("input[type=checkbox]")) {
     e.target.checked ? state.selected.add(key) : state.selected.delete(key);
     updateSelbar();
+    previewSoon();
   } else if (e.target.closest("[data-search]")) {
     enqueue([key]);
   } else if (e.target.closest(".rname")) {
@@ -338,17 +352,11 @@ $("#rel-body").addEventListener("click", (e) => {
 $("#rel-all").addEventListener("change", (e) => {
   for (const r of filteredReleases().slice(0, state.limit)) e.target.checked ? state.selected.add(r.key) : state.selected.delete(r.key);
   renderReleases();
+  previewSoon(0);
 });
-$("#rel-search-sel").addEventListener("click", () => { enqueue([...state.selected]); state.selected.clear(); renderReleases(); });
-$("#rel-target-sel").addEventListener("click", () => {
-  search.keys = [...state.selected];
-  location.hash = "#search";
-});
-$("#rel-clear-sel").addEventListener("click", () => { state.selected.clear(); renderReleases(); });
+$("#rel-clear-sel").addEventListener("click", () => { state.selected.clear(); renderReleases(); previewSoon(0); });
 $("#rel-more").addEventListener("click", () => { state.limit += 200; renderReleases(); });
 $("#rel-refresh").addEventListener("click", () => loadReleases(true));
-let qTimer;
-$("#rel-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.limit = 200; renderReleases(); }, 150); });
 $("table.rel thead").addEventListener("click", (e) => {
   const th = e.target.closest("th[data-sort]");
   if (!th) return;
@@ -370,7 +378,13 @@ $("#rel-cols-menu").addEventListener("change", (e) => {
 });
 document.addEventListener("click", (e) => { if (!e.target.closest("#rel-cols")) $("#rel-cols").open = false; });
 applyRelColumns();
-["#rel-filter", "#rel-tracker", "#rel-cat"].forEach((s) => $(s).addEventListener("change", () => { state.limit = 200; renderReleases(); }));
+$("#rel-sort").addEventListener("change", (e) => {
+  state.relSort = { key: e.target.value, dir: SORT_DEFAULT_DIR[e.target.value] || "asc" };
+  prefSet("relSort", state.relSort);
+  state.limit = 200;
+  applyRelColumns();
+  renderReleases();
+});
 
 // ---------- file de recherche ----------
 const SKIP_WORDS = [
@@ -484,10 +498,11 @@ function batchHtml(b, q) {
 async function loadQueue() {
   try { state.queue = await api("/api/queue"); } catch { return; }
   const q = state.queue;
-  const cnt = $("#cnt-queue");
-  cnt.textContent = q.pending || "";
-  cnt.classList.toggle("hot", q.pending > 0);
-  if (state.tab !== "queue") return;
+  for (const cnt of [$("#cnt-queue"), $("#cnt-queue2")]) {
+    cnt.textContent = q.pending || "";
+    cnt.classList.toggle("hot", q.pending > 0);
+  }
+  if (state.tab !== "follow" || state.sub !== "queue") return;
   $("#q-pause").textContent = q.paused ? "Reprendre" : "Pause";
   let st;
   if (state.readonly) st = `Lecture seule : la file ne part pas, ${q.pending} recherche(s) en attente.`;
@@ -505,7 +520,7 @@ async function loadQueue() {
   const singles = sortQueue(q.items);
   $("#q-singles").hidden = !singles.length && q.batches.length > 0;
   $("#q-body").innerHTML = singles.length ? singles.map(queueRow).join("")
-    : `<tr><td colspan="5" class="empty">Rien dans la file. Lance une recherche depuis l'onglet <a href="#search">Chercher</a>, ou clique « Chercher » sur une release.</td></tr>`;
+    : `<tr><td colspan="5" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`;
 }
 
 $("#q-batches").addEventListener("click", async (e) => {
@@ -548,11 +563,13 @@ $("#q-clear-done").addEventListener("click", async () => {
   loadQueue();
 });
 
-// ---------- onglet Chercher : « des releases (critères) → vers des trackers » ----------
-// Le choix est gardé dans ce navigateur (sauf une sélection venue de l'onglet Releases).
-const search = Object.assign({ groups: [], categories: [], targets: [], text: "", rule: "", fresh: "all", days: 30, maxSeeds: "", limit: "" },
-  prefGet("search", {}), { keys: null });
-const saveSearch = () => { const { keys, ...rest } = search; prefSet("search", rest); };
+// ---------- page 1, Chercher : « des releases (critères) → vers des trackers » ----------
+// Les choix sont gardés dans ce navigateur. Les releases cochées dans la liste remplacent les critères.
+const SEARCH_DEFAULT = { groups: [], categories: [], mode: "group", targets: [], text: "", rule: "", state: "",
+  onTracker: "", fresh: "all", days: 30, maxSeeds: "", limit: "" };
+const search = Object.assign({}, SEARCH_DEFAULT, prefGet("search", {}));
+if (!["group", "manual"].includes(search.mode)) search.mode = search.targets.length ? "manual" : "group";
+const saveSearch = () => prefSet("search", search);
 const has = (arr, v) => arr.some((x) => lc(x) === lc(v));
 const toggle = (arr, v) => (has(arr, v) ? arr.filter((x) => lc(x) !== lc(v)) : [...arr, v]);
 
@@ -560,35 +577,38 @@ function scopeCount(pred) { return state.releases.filter(pred).length; }
 function chipBtn(attrs, label, on, extra = "", style = "") {
   return `<button type="button" class="pchip${on ? " on" : ""}${extra}" ${attrs} aria-pressed="${on}"${style ? ` style="${style}"` : ""}>${label}</button>`;
 }
+function fillSelect(sel, values, current, first) {
+  sel.innerHTML = `<option value="">${first}</option>` + values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  sel.value = values.includes(current) ? current : "";
+  return sel.value;
+}
 
 function renderSearch() {
   if (!state.settings) { api("/api/settings").then((s) => { state.settings = s; renderSearch(); }).catch(() => {}); return; }
   const groups = state.settings.groups || [];
   const idx = activeIndexers();
-  // les choix devenus invalides (groupe supprimé, indexer retiré) sont oubliés
+  // choix devenus invalides (groupe supprimé, indexer retiré) : oubliés
   search.groups = search.groups.filter((n) => groups.some((g) => lc(g.name) === lc(n)));
-  search.targets = search.targets.filter((k) => idx.some((i) => i.key === k));
+  if (idx.length) search.targets = search.targets.filter((k) => idx.some((i) => i.key === k));
 
   // 1. releases
-  const none = !search.groups.length && !search.categories.length && !search.keys;
+  const none = !search.groups.length && !search.categories.length;
   let html = chipBtn('data-scope="all"', `Toutes <small>${state.releases.length}</small>`, none);
-  if (search.keys) html += chipBtn('data-scope="keys"', `Sélection <small>${search.keys.length}</small> <span aria-hidden="true">✕</span>`, true, " sel", "");
   if (groups.length) {
     html += `<span class="chips-sep">Groupes</span>`;
     html += groups.map((g) => chipBtn(`data-group="${esc(g.name)}"`,
-      `${esc(g.name)} <small>${scopeCount((r) => groupFor(r.category, groups) === g)}</small>`, !search.keys && has(search.groups, g.name), " grp")).join("");
+      `${esc(g.name)} <small>${scopeCount((r) => groupFor(r.category, groups) === g)}</small>`, has(search.groups, g.name), " grp")).join("");
   }
   html += `<span class="chips-sep">Catégories</span>`;
   html += knownCategories().map((c) => chipBtn(`data-cat="${esc(c)}"`,
-    `${esc(catName(c))} <small>${scopeCount((r) => lc(r.category) === lc(c))}</small>`, !search.keys && has(search.categories, c))).join("");
+    `${esc(catName(c))} <small>${scopeCount((r) => lc(r.category) === lc(c))}</small>`, has(search.categories, c))).join("");
   $("#s-scope").innerHTML = html;
 
   // affiner
-  const rsel = $("#s-rule");
-  const labels = [...new Set(state.settings.rules.filter((r) => r.enabled).map(ruleLabel))];
-  rsel.innerHTML = `<option value="">Toutes les releases</option>` + labels.map((l) => `<option value="${esc(l)}">${esc(l)}</option>`).join("");
-  rsel.value = labels.includes(search.rule) ? search.rule : "";
+  search.rule = fillSelect($("#s-rule"), [...new Set(state.settings.rules.filter((r) => r.enabled).map(ruleLabel))], search.rule, "Peu importe");
+  if (state.trackerLabels) search.onTracker = fillSelect($("#s-ontracker"), state.trackerLabels, search.onTracker, "Peu importe");
   $("#s-text").value = search.text;
+  $("#s-state").value = search.state;
   $("#s-fresh").value = search.fresh;
   $("#s-days").value = search.days;
   $("#s-days-wrap").hidden = search.fresh !== "days";
@@ -596,35 +616,34 @@ function renderSearch() {
   $("#s-limit").value = search.limit;
   refineSummary();
 
-  // 2. trackers
-  let t = chipBtn('data-target="default"', "Trackers des groupes", !search.targets.length, " dflt");
-  const withIdx = groups.filter((g) => g.indexers.some((k) => idx.some((i) => i.key === k)));
-  if (withIdx.length) {
-    t += `<span class="chips-sep">Tout un groupe</span>`;
-    t += withIdx.map((g) => {
-      const keys = g.indexers.filter((k) => idx.some((i) => i.key === k));
-      return chipBtn(`data-tgroup="${esc(g.name)}"`, esc(g.name), keys.every((k) => search.targets.includes(k)), " grp");
-    }).join("");
+  // 2. trackers : selon le groupe de chaque release, ou choisis à la main
+  $$("#s-mode [data-mode]").forEach((b) => { const on = b.dataset.mode === search.mode; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
+  const manual = search.mode === "manual";
+  $("#s-targets").hidden = !manual;
+  if (manual) {
+    $("#s-targets").innerHTML = idx.map((i) => chipBtn(`data-target="${esc(i.key)}"`, esc(i.label),
+      search.targets.includes(i.key), " trk", `--c:${trackerColor(i.label)}`)).join("")
+      || `<span class="muted">Aucun indexer actif dans config.js.</span>`;
   }
-  t += `<span class="chips-sep">Trackers</span>`;
-  t += idx.map((i) => chipBtn(`data-target="${esc(i.key)}"`, esc(i.label), search.targets.includes(i.key), " trk", `--c:${trackerColor(i.label)}`)).join("");
-  $("#s-targets").innerHTML = t;
-  $("#s-targets-hint").textContent = search.targets.length
-    ? `Recherche directe sur ${search.targets.length === 1 ? "ce tracker" : `ces ${search.targets.length} trackers`} : l'interface les interroge elle-même, cross-seed vérifie et injecte. Les trackers où la release est déjà en seed ne sont pas interrogés.`
-    : "Chaque release est cherchée sur les trackers de son groupe (Réglages › Groupes de trackers). Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.";
+  $("#s-targets-hint").innerHTML = manual
+    ? (search.targets.length ? "Toutes les releases choisies sont cherchées sur les trackers cochés." : "Coche un ou plusieurs trackers.")
+    : groups.length
+      ? `Un film part vers les trackers de son groupe, un album vers ceux du sien… Groupes définis dans <a href="#settings" data-goto="set-groups">Réglages</a>.`
+      : `Aucun groupe défini : cross-seed cherche sur tous ses indexers. Crée tes groupes dans <a href="#settings" data-goto="set-groups">Réglages</a>.`;
+  renderReleases();
   previewSoon(0);
 }
 
 function refineSummary() {
-  const n = [search.text, search.rule, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
+  const n = [search.text, search.rule, search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
   $("#s-refine-sum").textContent = n ? `(${n} filtre${n > 1 ? "s" : ""})` : "";
 }
 
 function criteria() {
-  const c = { targets: search.targets, text: search.text, rule: search.rule,
-    fresh: { mode: search.fresh, days: +search.days || 30 } };
-  if (search.keys) c.keys = search.keys;
-  else { c.groups = search.groups; c.categories = search.categories; }
+  const c = { targets: search.mode === "manual" ? search.targets : [] };
+  if (state.selected.size) { c.keys = [...state.selected]; return c; }
+  Object.assign(c, { groups: search.groups, categories: search.categories, text: search.text, rule: search.rule,
+    state: search.state, on_tracker: search.onTracker, fresh: { mode: search.fresh, days: +search.days || 30 } });
   if (search.maxSeeds !== "") c.max_seeds = +search.maxSeeds;
   if (search.limit !== "") c.limit = +search.limit;
   return c;
@@ -634,77 +653,86 @@ let previewTimer, previewSeq = 0, lastPreview = null;
 function previewSoon(ms = 250) { clearTimeout(previewTimer); previewTimer = setTimeout(preview, ms); }
 async function preview() {
   const seq = ++previewSeq;
-  $("#s-go").disabled = true;
+  const go = $("#s-go");
+  if (search.mode === "manual" && !search.targets.length) {
+    $("#s-summary").innerHTML = "<b>Choisis au moins un tracker</b>";
+    $("#s-why").textContent = "";
+    go.disabled = true; go.textContent = "Lancer";
+    return;
+  }
+  go.disabled = true;
   let d;
   try { d = await api("/api/demandes/preview", { method: "POST", body: criteria() }); }
   catch (err) { if (seq === previewSeq) { $("#s-summary").textContent = err.message; $("#s-why").textContent = ""; } return; }
   if (seq !== previewSeq) return;   // une saisie plus récente a relancé l'aperçu
   lastPreview = d;
   const n = d.count;
-  const to = search.targets.length ? d.to : "trackers des groupes";
-  $("#s-summary").innerHTML = n
-    ? `<b>${n} release${n > 1 ? "s" : ""}</b> → ${esc(to)}`
-    : `<b>Aucune release à chercher</b> → ${esc(to)}`;
+  const to = search.mode === "manual" ? d.to : "le groupe de chaque release";
+  const what = state.selected.size ? `${n} release${n > 1 ? "s" : ""} cochée${n > 1 ? "s" : ""}` : `${n} release${n > 1 ? "s" : ""}`;
+  $("#s-summary").innerHTML = n ? `<b>${what}</b> → ${esc(to)}` : `<b>Rien à chercher</b> → ${esc(to)}`;
   const why = [];
-  if (n) why.push(`environ ${fmtDuration(d.duration)} (une toutes les ${d.delay} s)`);
+  if (n) why.push(`environ ${fmtDuration(d.duration)}`);
   if (d.matched > n) why.push(`${d.matched - n} de plus au-delà de la limite`);
   const c = d.counts;
   if (c.seeded) why.push(`${c.seeded} déjà en seed sur la cible`);
   if (c.recent) why.push(`${c.recent} déjà cherchée${c.recent > 1 ? "s" : ""}`);
-  if (c.filtered) why.push(`${c.filtered} écartée${c.filtered > 1 ? "s" : ""} par les filtres`);
   if (c.no_target) why.push(`${c.no_target} sans tracker cible`);
   if (c.xs) why.push(`${c.xs} sans groupe : cross-seed, tous ses indexers`);
   $("#s-why").textContent = why.join(" · ");
-  $("#s-go").disabled = !n;
-  $("#s-go").textContent = n ? `Lancer ${n} recherche${n > 1 ? "s" : ""}` : "Lancer";
-  $("#s-examples").innerHTML = n ? `<h4>Ordre de passage${n > d.examples.length ? " (premières)" : ""}</h4><ol>${d.examples.map((x) =>
-    `<li><span class="mono">${esc(x.name)}</span> <span class="muted">${esc(catName(x.category))} · ${x.seeds} tracker${x.seeds > 1 ? "s" : ""}</span></li>`).join("")}</ol>` : "";
+  go.disabled = !n;
+  go.textContent = n ? `Lancer ${n} recherche${n > 1 ? "s" : ""}` : "Lancer";
 }
 
+function searchChanged() { state.limit = 200; saveSearch(); renderSearch(); }
 $("#s-scope").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.dataset.scope === "all") { search.groups = []; search.categories = []; search.keys = null; }
-  else if (b.dataset.scope === "keys") search.keys = null;
-  else if (b.dataset.group !== undefined) { search.keys = null; search.groups = toggle(search.groups, b.dataset.group); }
-  else if (b.dataset.cat !== undefined) { search.keys = null; search.categories = toggle(search.categories, b.dataset.cat); }
-  saveSearch();
-  renderSearch();
+  if (b.dataset.scope === "all") { search.groups = []; search.categories = []; }
+  else if (b.dataset.group !== undefined) search.groups = toggle(search.groups, b.dataset.group);
+  else if (b.dataset.cat !== undefined) search.categories = toggle(search.categories, b.dataset.cat);
+  searchChanged();
+});
+$("#s-mode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (!b) return;
+  search.mode = b.dataset.mode;
+  searchChanged();
 });
 $("#s-targets").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
+  const b = e.target.closest("[data-target]");
   if (!b) return;
-  if (b.dataset.target === "default") search.targets = [];
-  else if (b.dataset.target) search.targets = search.targets.includes(b.dataset.target)
-    ? search.targets.filter((k) => k !== b.dataset.target) : [...search.targets, b.dataset.target];
-  else if (b.dataset.tgroup) {
-    const g = state.settings.groups.find((x) => x.name === b.dataset.tgroup);
-    const keys = g.indexers.filter((k) => activeIndexers().some((i) => i.key === k));
-    search.targets = keys.every((k) => search.targets.includes(k))
-      ? search.targets.filter((k) => !keys.includes(k)) : [...new Set([...search.targets, ...keys])];
-  }
-  saveSearch();
-  renderSearch();
+  const k = b.dataset.target;
+  search.targets = search.targets.includes(k) ? search.targets.filter((x) => x !== k) : [...search.targets, k];
+  searchChanged();
 });
-const REFINE = { "#s-text": "text", "#s-rule": "rule", "#s-fresh": "fresh", "#s-days": "days", "#s-maxseeds": "maxSeeds", "#s-limit": "limit" };
+const REFINE = { "#s-text": "text", "#s-rule": "rule", "#s-state": "state", "#s-ontracker": "onTracker", "#s-fresh": "fresh",
+  "#s-days": "days", "#s-maxseeds": "maxSeeds", "#s-limit": "limit" };
+let refineTimer;
 for (const [sel, k] of Object.entries(REFINE)) {
   $(sel).addEventListener("input", (e) => {
-    search[k] = e.target.value.trim ? e.target.value.trim() : e.target.value;
+    search[k] = e.target.value.trim();
     $("#s-days-wrap").hidden = search.fresh !== "days";
     refineSummary();
     saveSearch();
+    clearTimeout(refineTimer);
+    refineTimer = setTimeout(() => { state.limit = 200; renderReleases(); }, 150);
     previewSoon();
   });
 }
+$("#s-reset").addEventListener("click", () => {
+  Object.assign(search, { text: "", rule: "", state: "", onTracker: "", fresh: "all", maxSeeds: "", limit: "" });
+  searchChanged();
+});
 $("#s-go").addEventListener("click", async (e) => {
   const n = lastPreview ? lastPreview.count : 0;
-  if (n > 100 && !confirm(`Lancer ${n} recherches ?\n\nÀ une recherche toutes les ${lastPreview.delay} s, il faudra environ ${fmtDuration(lastPreview.duration)}. Tu pourras annuler la demande depuis la file.`)) return;
+  if (n > 100 && !confirm(`Lancer ${n} recherches ?\n\nÀ une recherche toutes les ${lastPreview.delay} s, il faudra environ ${fmtDuration(lastPreview.duration)}. Tu pourras annuler depuis « Suivre l'avancement ».`)) return;
   e.target.disabled = true;
   try {
     const r = await api("/api/demandes", { method: "POST", body: criteria() });
-    toast(`${r.added} recherche${r.added > 1 ? "s" : ""} ajoutée${r.added > 1 ? "s" : ""} à la file${r.skipped ? `, ${r.skipped} déjà en file` : ""}`);
-    if (search.keys) { search.keys = null; state.selected.clear(); renderReleases(); }
-    location.hash = "#queue";
+    toast(`${r.added} recherche${r.added > 1 ? "s" : ""} ajoutée${r.added > 1 ? "s" : ""}${r.skipped ? `, ${r.skipped} déjà en file` : ""}`);
+    state.selected.clear();
+    state.sub = "queue";
+    location.hash = "#follow";
     window.scrollTo(0, 0);
   } catch (err) { toast(err.message, true); e.target.disabled = false; }
 });
@@ -883,7 +911,7 @@ async function restartXs(btn) {
     state.xsRestarting = false;
     btn.disabled = false;
     await loadHealth();
-    if (ok && state.tab === "indexers") loadIndexers();
+    if (ok && state.tab === "settings") loadIndexers();
   }
 }
 $("#idx-restart").addEventListener("click", (e) => restartXs(e.target));
@@ -1220,6 +1248,7 @@ async function renderSettings() {
   renderAliases();
   renderSources();
   renderXsForm();
+  loadIndexers();
 }
 
 // ---------- sources d'indexers ----------
@@ -1429,7 +1458,7 @@ $("#set-delay").addEventListener("input", () => { state.settingsDirty = true; })
 window.addEventListener("beforeunload", (e) => { if (state.settingsDirty) e.preventDefault(); });
 
 // ---------- démarrage ----------
-showTab(location.hash.slice(1) || "releases");
+showTab(location.hash.slice(1) || "search");
 loadHealth();
 loadReleases();
 loadQueue();
@@ -1437,4 +1466,4 @@ loadPending();
 loadIndexers();
 setInterval(loadHealth, 30000);
 setInterval(loadQueue, 3000);
-setInterval(() => { if (state.tab === "pending" || !document.hidden) loadPending(); }, 60000);
+setInterval(() => { if (!document.hidden) loadPending(); }, 60000);

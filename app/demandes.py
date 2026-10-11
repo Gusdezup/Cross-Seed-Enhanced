@@ -3,8 +3,11 @@
 Critères (tous facultatifs, combinés) :
   groups      noms de groupes de trackers : releases dont la catégorie relève de ces groupes
   categories  catégories qBittorrent ("" = sans catégorie) ; groupes et catégories s'additionnent
-  keys        releases choisies à la main dans l'onglet Releases (remplace groupes et catégories)
+  keys        releases cochées à la main dans la liste : remplacent tous les autres critères
   text        mots présents dans le nom (tous)
+  state       "available" (cross-seed trouvé, pas injecté), "noorig" (sans torrent d'origine),
+              "dup" (plusieurs copies sur un même tracker)
+  on_tracker  nom d'un tracker où la release est présente dans qBittorrent
   rule        étiquette d'une règle prioritaire
   max_seeds   en seed sur au plus N trackers
   fresh       {"mode": "all" | "never" | "days", "days": N} : sur au moins un tracker cible, jamais
@@ -20,6 +23,7 @@ from datetime import datetime, timedelta
 from . import config, releases
 
 FRESH_MODES = ("all", "never", "days")
+STATES = ("available", "noorig", "dup")
 
 
 def _strs(v) -> list:
@@ -44,6 +48,8 @@ def normalize(body: dict) -> dict:
         "keys": [k for k in _strs(body.get("keys")) if k],
         "text": str(body.get("text") or "").strip(),
         "rule": str(body.get("rule") or "").strip(),
+        "state": body.get("state") if body.get("state") in STATES else "",
+        "on_tracker": str(body.get("on_tracker") or "").strip(),
         "max_seeds": None if body.get("max_seeds") in (None, "") else num(body.get("max_seeds"), 0, 999, None),
         "fresh": {"mode": mode, "days": num(fresh.get("days"), 1, 3650, 30)},
         "targets": list(dict.fromkeys(k for k in _strs(body.get("targets")) if k)),
@@ -63,6 +69,23 @@ def _in_scope(r: dict, crit: dict, groups: list) -> bool:
         g = config.group_for(r.get("category"), groups)
         return bool(g) and g["name"].lower() in {n.lower() for n in crit["groups"]}
     return False
+
+
+def _passes(r: dict, crit: dict, terms: list) -> bool:
+    """Filtres « Affiner » qui ne dépendent pas des trackers cibles (mêmes règles que la liste affichée)."""
+    if terms and not all(t in r["name"].lower() for t in terms):
+        return False
+    if crit["rule"] and crit["rule"] not in r["rules"]:
+        return False
+    if crit["max_seeds"] is not None and r["seeds"] > crit["max_seeds"]:
+        return False
+    st = crit["state"]
+    if (st == "available" and not r.get("available")) or (st == "noorig" and r["has_original"]) \
+            or (st == "dup" and len({c["tracker"] for c in r["copies"]}) == len(r["copies"])):
+        return False
+    if crit["on_tracker"] and not any(c["tracker"] == crit["on_tracker"] for c in r["copies"]):
+        return False
+    return True
 
 
 def targets_for(r: dict, crit: dict, groups: list, active: dict):
@@ -91,9 +114,7 @@ def select(items: list, crit: dict, settings: dict, active: dict) -> dict:
         if not _in_scope(r, crit, groups):
             continue
         counts["scope"] += 1
-        if (terms and not all(t in r["name"].lower() for t in terms)) \
-                or (crit["rule"] and crit["rule"] not in r["rules"]) \
-                or (crit["max_seeds"] is not None and r["seeds"] > crit["max_seeds"]):
+        if not crit["keys"] and not _passes(r, crit, terms):
             counts["filtered"] += 1
             continue
         keys, mode = targets_for(r, crit, groups, active)
@@ -105,7 +126,7 @@ def select(items: list, crit: dict, settings: dict, active: dict) -> dict:
         if not open_:
             counts["seeded"] += 1
             continue
-        fm = crit["fresh"]["mode"]
+        fm = "all" if crit["keys"] else crit["fresh"]["mode"]
         if fm == "never" and not any(s == "never" for s, _ in open_.values()):
             counts["recent"] += 1
             continue
@@ -127,7 +148,8 @@ def select(items: list, crit: dict, settings: dict, active: dict) -> dict:
 def label(crit: dict, active: dict) -> tuple:
     """(titre court, cibles lisibles) d'une demande, pour la file."""
     if crit["keys"]:
-        what = f"Sélection de {len(crit['keys'])} release{'s' if len(crit['keys']) > 1 else ''}"
+        return (f"Sélection de {len(crit['keys'])} release{'s' if len(crit['keys']) > 1 else ''}",
+                ", ".join(active.get(k, k) for k in crit["targets"]) if crit["targets"] else "trackers des groupes")
     else:
         parts = [f"groupe {g}" for g in crit["groups"]] + \
                 [c if c else "sans catégorie" for c in crit["categories"]]
@@ -137,6 +159,11 @@ def label(crit: dict, active: dict) -> tuple:
         extra.append(f"« {crit['text']} »")
     if crit["rule"]:
         extra.append(f"règle {crit['rule']}")
+    if crit["state"]:
+        extra.append({"available": "cross-seed trouvé non injecté", "noorig": "sans torrent d'origine",
+                      "dup": "copies en double"}[crit["state"]])
+    if crit["on_tracker"]:
+        extra.append(f"présentes sur {crit['on_tracker']}")
     if crit["max_seeds"] is not None:
         extra.append(f"≤ {crit['max_seeds']} tracker{'s' if crit['max_seeds'] > 1 else ''}")
     if crit["fresh"]["mode"] == "never":
