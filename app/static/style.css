@@ -474,3 +474,4 @@ table.rel td:nth-child(2) { min-width: 260px; }
 
 /* recherche par mot clé, toujours visible en tête de Chercher */
 .s-text { width: 100%; max-width: 560px; display: block; margin-bottom: 12px; padding: 9px 12px !important; font-size: 15px; }
+#scan-status { margin-top: 18px; }

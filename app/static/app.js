@@ -150,13 +150,13 @@ document.addEventListener("click", async (e) => {
 // ---------- releases ----------
 // Préférences d'affichage propres à ce navigateur (tri, colonnes masquées)
 const REL_COLS = [
-  ["rules", "Priorité"], ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Trackers"],
+  ["cat", "Catégorie"], ["size", "Taille"], ["added", "Ajoutée"], ["last", "Dernière recherche"], ["copies", "Trackers"],
 ];
 const SORT_DEFAULT_DIR = { rules: "asc", name: "asc", category: "asc", size: "desc", added: "desc", last: "asc", seeds: "asc" };
 function prefGet(k, dflt) { try { const v = localStorage.getItem(`xse.${k}`); return v ? JSON.parse(v) : dflt; } catch { return dflt; } }
 function prefSet(k, v) { try { localStorage.setItem(`xse.${k}`, JSON.stringify(v)); } catch { /* stockage indisponible */ } }
 state.relSort = prefGet("relSort", { key: "seeds", dir: "asc" });
-if (!(state.relSort.key in SORT_DEFAULT_DIR)) state.relSort = { key: "seeds", dir: "asc" };
+if (!(state.relSort.key in SORT_DEFAULT_DIR) || state.relSort.key === "rules") state.relSort = { key: "seeds", dir: "asc" };
 state.relHidden = new Set(prefGet("relHidden", []));
 
 function fmtDay(iso) {
@@ -266,9 +266,8 @@ function chipsHtml(r) {
 function renderReleases() {
   const list = filteredReleases();
   const shown = list.slice(0, state.limit);
-  const ruleCount = state.releases.filter((r) => r.rules.length).length;
   $("#rel-summary").textContent = `${list.length} sur ${state.releases.length} releases ` +
-    `(${state.torrents} torrents terminés, ${ruleCount} prioritaires)`;
+    `(${state.torrents} torrents terminés)`;
   const body = $("#rel-body");
   if (!shown.length) {
     body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ces critères.</td></tr>`;
@@ -279,7 +278,6 @@ function renderReleases() {
       const row = `<tr data-key="${esc(r.key)}">
         <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
         <td><span class="rname" title="Afficher le détail">${esc(r.name)}</span>${flag}</td>
-        <td class="c-rules">${r.rules.map((n) => `<span class="tag rule">${esc(n)}</span>`).join("")}</td>
         <td class="c-cat">${esc(r.category || "—")}</td>
         <td class="c-size">${fmtSize(r.size)}</td>
         <td class="c-added" title="${esc(fmtFull(r.added_on))}">${fmtDay(r.added_on)}</td>
@@ -569,6 +567,7 @@ const SEARCH_DEFAULT = { groups: [], categories: [], mode: "group", targets: [],
   onTracker: "", fresh: "all", days: 30, maxSeeds: "", limit: "" };
 const search = Object.assign({}, SEARCH_DEFAULT, prefGet("search", {}));
 if (!["group", "manual"].includes(search.mode)) search.mode = search.targets.length ? "manual" : "group";
+search.rule = "";   // critère retiré : les règles ne servent plus qu'à l'ordre de passage
 const saveSearch = () => prefSet("search", search);
 const has = (arr, v) => arr.some((x) => lc(x) === lc(v));
 const toggle = (arr, v) => (has(arr, v) ? arr.filter((x) => lc(x) !== lc(v)) : [...arr, v]);
@@ -605,7 +604,6 @@ function renderSearch() {
   $("#s-scope").innerHTML = html;
 
   // affiner
-  search.rule = fillSelect($("#s-rule"), [...new Set(state.settings.rules.filter((r) => r.enabled).map(ruleLabel))], search.rule, "Peu importe");
   if (state.trackerLabels) search.onTracker = fillSelect($("#s-ontracker"), state.trackerLabels, search.onTracker, "Peu importe");
   $("#s-text").value = search.text;
   $("#s-state").value = search.state;
@@ -635,14 +633,14 @@ function renderSearch() {
 }
 
 function refineSummary() {
-  const n = [search.rule, search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
+  const n = [search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
   $("#s-refine-sum").textContent = n ? `(${n} filtre${n > 1 ? "s" : ""})` : "";
 }
 
 function criteria() {
   const c = { targets: search.mode === "manual" ? search.targets : [] };
   if (state.selected.size) { c.keys = [...state.selected]; return c; }
-  Object.assign(c, { groups: search.groups, categories: search.categories, text: search.text, rule: search.rule,
+  Object.assign(c, { groups: search.groups, categories: search.categories, text: search.text,
     state: search.state, on_tracker: search.onTracker, fresh: { mode: search.fresh, days: +search.days || 30 } });
   if (search.maxSeeds !== "") c.max_seeds = +search.maxSeeds;
   if (search.limit !== "") c.limit = +search.limit;
@@ -705,7 +703,7 @@ $("#s-targets").addEventListener("click", (e) => {
   search.targets = search.targets.includes(k) ? search.targets.filter((x) => x !== k) : [...search.targets, k];
   searchChanged();
 });
-const REFINE = { "#s-text": "text", "#s-rule": "rule", "#s-state": "state", "#s-ontracker": "onTracker", "#s-fresh": "fresh",
+const REFINE = { "#s-text": "text", "#s-state": "state", "#s-ontracker": "onTracker", "#s-fresh": "fresh",
   "#s-days": "days", "#s-maxseeds": "maxSeeds", "#s-limit": "limit" };
 let refineTimer;
 for (const [sel, k] of Object.entries(REFINE)) {

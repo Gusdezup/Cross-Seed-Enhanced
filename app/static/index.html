@@ -38,7 +38,6 @@
         <details class="refine" id="s-refine">
           <summary>Affiner <span id="s-refine-sum"></span></summary>
           <div class="refine-grid">
-            <label class="field">Règle prioritaire<select id="s-rule"><option value="">Peu importe</option></select></label>
             <label class="field">Présente sur le tracker<select id="s-ontracker"><option value="">Peu importe</option></select></label>
             <label class="field">État
               <select id="s-state">
@@ -80,7 +79,6 @@
           <span class="btns">
             <select id="rel-sort" aria-label="Trier par">
               <option value="seeds">Trier : moins de trackers d'abord</option>
-              <option value="rules">Trier : prioritaires d'abord</option>
               <option value="name">Trier : nom</option>
               <option value="added">Trier : ajoutées récemment</option>
               <option value="last">Trier : cherchées il y a longtemps</option>
@@ -107,7 +105,6 @@
             <thead><tr>
               <th class="c-check"><input type="checkbox" id="rel-all" aria-label="Tout cocher"></th>
               <th data-sort="name">Release</th>
-              <th class="c-rules" data-sort="rules" title="Règles prioritaires (Réglages) auxquelles la release correspond">Priorité</th>
               <th class="c-cat" data-sort="category">Catégorie</th>
               <th class="c-size" data-sort="size">Taille</th>
               <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
@@ -193,7 +190,7 @@
     <!-- 3. RÉGLAGES -->
     <section id="tab-settings" class="tab" hidden>
       <nav class="toc" aria-label="Sections des réglages">
-        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-rules">Règles</a><a href="#settings" data-goto="set-scan">Scan planifié</a>
+        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-scan">Scan planifié</a>
         <a href="#settings" data-goto="set-indexers">Indexers</a><a href="#settings" data-goto="sources-h">Sources</a><a href="#settings" data-goto="set-xs">cross-seed</a>
       </nav>
       <h2 id="set-groups">Groupes de trackers</h2>
@@ -202,19 +199,19 @@
       <div id="groups"></div>
       <button class="ghost" id="group-add">Ajouter un groupe</button>
 
-      <h2 id="set-rules">Règles prioritaires</h2>
-      <p class="muted">Une release est prioritaire si le nom d'une de ses copies correspond à une règle active, ou, pour une règle « Catégorie », si elle est dans cette catégorie qBittorrent (majuscules et minuscules confondues). Le nombre de releases concernées et quelques exemples s'affichent pendant la saisie. L'ordre des règles fixe l'ordre de passage.</p>
-      <div id="rules"></div>
-      <button class="ghost" id="rule-add">Ajouter une règle</button>
-
       <h2 id="set-scan">Scan planifié</h2>
-      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles des règles prioritaires d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Chaque release est cherchée sur les trackers de son groupe. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
+      <p class="muted">À intervalle régulier, l'interface met en file les releases à chercher : celles de « Passer en premier » d'abord, puis les moins cross-seedées, puis celles cherchées il y a le plus longtemps. Chaque release est cherchée sur les trackers de son groupe. Seules les releases dont le torrent d'origine est dans qBittorrent sont retenues.</p>
       <div class="scan-form">
         <label class="check"><input type="checkbox" id="scan-enabled"> Activer le scan planifié</label>
         <label class="field">Toutes les<span><input type="number" id="scan-every" min="1" max="720"> heures</span></label>
         <label class="field">Au plus<span><input type="number" id="scan-limit" min="0"> releases par passage (0 : sans limite)</span></label>
         <label class="field">Sauter les releases cherchées depuis moins de<span><input type="number" id="scan-recent" min="0"> jours</span></label>
       </div>
+      <h3 id="set-rules">Passer en premier</h3>
+      <p class="muted">Releases servies avant les autres, dans l'ordre des lignes : par le scan planifié, et dans toute recherche lancée depuis Chercher. Exemple : groupe de release HDForever. Le nombre de releases concernées s'affiche pendant la saisie.</p>
+      <div id="rules"></div>
+      <button class="ghost" id="rule-add">Ajouter</button>
+
       <p class="muted" id="scan-status"></p>
       <div class="btns"><button class="ghost" id="scan-run">Lancer un passage maintenant</button></div>
       <div class="scan-xs">
