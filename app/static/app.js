@@ -63,7 +63,7 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
-  settings: null, queue: null, tab: "search", sub: "queue", indexers: [], openBatches: new Set(), batchItems: {},
+  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), indexers: [], openBatches: new Set(), batchItems: {},
 };
 
 // ---------- onglets ----------
@@ -452,14 +452,54 @@ function routedResultHtml(r) {
 const QLBL = { pending: "en attente", running: "en cours", done: "terminée", error: "erreur", timeout: "sans réponse" };
 function queueRow(i) {
   const src = ["manuel", "demande", "scan", "programmée"].includes(i.source) ? i.source : `<span class="tag rule">${esc(i.source)}</span>`;
-  return `<tr>
+  const open = state.openItems.has(i.id);
+  return `<tr data-item="${i.id}">
       <td><span class="st ${i.status}">${QLBL[i.status]}</span></td>
-      <td><div class="rname">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
+      <td><div class="rname qname" title="Afficher le détail">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
       <td>${src}</td>
       <td>${resultHtml(i)}</td>
       <td class="c-when">${queueWhen(i)}</td>
       <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
-    </tr>`;
+    </tr>` + (open ? `<tr class="detail qdetail"><td colspan="6">${queueDetail(i)}</td></tr>` : "");
+}
+// Détail d'une recherche de la file (clic sur son nom)
+function queueDetail(i) {
+  const at = (sec) => (sec ? new Date(sec * 1000).toLocaleString("fr-FR") : "—");
+  const label = (k) => (state.indexers.find((x) => x.key === k) || {}).label || k;
+  const list = (arr) => (arr && arr.length ? [...new Set(arr)].map(esc).join(", ") : "—");
+  const rows = [["Ajoutée à la file", at(i.added)], ["Envoyée", at(i.sent)], ["Terminée", at(i.done)]];
+  rows.push(["Cible", (i.targets || []).length ? list(i.targets.map(label)) : "selon le groupe"]);
+  const r = i.result || {};
+  if (r.routed) {
+    rows.push(["Trackers interrogés", list(r.routed)]);
+    if ((r.seeded || []).length) rows.push(["Non interrogés : déjà en seed", list(r.seeded)]);
+    if ((r.paused || []).length) rows.push(["Non interrogés : en pause", list(r.paused)]);
+    rows.push(["Résultats examinés", String(r.candidates ?? 0)]);
+    rows.push(["Injectés", list(r.injected)]);
+    if ((r.matched || []).length) rows.push(["Trouvés, non confirmés", list(r.matched)]);
+    if ((r.exists || []).length) rows.push(["Déjà présents", list(r.exists)]);
+    if ((r.failed || []).length) rows.push(["Échec d'injection", list(r.failed)]);
+    if ((r.errors || []).length) rows.push(["Erreurs", r.errors.map(esc).join("<br>")]);
+  } else if (i.result) {
+    rows.push(["Recherche", "cross-seed, sur tous ses indexers"]);
+    rows.push(["Torrents trouvés", String(r.found ?? "—")]);
+    rows.push(["Injectés", list(r.injected)]);
+    if ((r.failed || []).length) rows.push(["Échec d'injection", list(r.failed)]);
+    if (r.skipped) rows.push(["Sautée", esc(explainSkip(r.skipped))]);
+    if (r.refused) rows.push(["Refusée", esc(r.refused)]);
+  }
+  if (i.error) rows.push(["Erreur", esc(i.error)]);
+  rows.push(["Envoyé à cross-seed", `<span class="mono">${esc(i.target || "")}</span>`]);
+  return `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+// Mise à jour de la file sans gêner la lecture : rien n'est redessiné si rien n'a changé,
+// ni pendant une sélection de texte dans la zone (copier-coller)
+function setHtml(el, html) {
+  if (el._html === html) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && el.contains(sel.anchorNode)) return;
+  el.innerHTML = html;
+  el._html = html;
 }
 // Date de la recherche : fin si elle est terminée, départ si elle est en cours ; rien si elle attend encore
 function queueWhen(i) {
@@ -536,14 +576,26 @@ async function loadQueue() {
     try { state.batchItems[id] = (await api(`/api/queue/batch/${id}`)).items; } catch { /* demande supprimée */ }
   }));
   const live = q.batches.filter((b) => !b.finished), done = q.batches.filter((b) => b.finished).slice(0, 10);
-  $("#q-batches").innerHTML = live.concat(done).map((b) => batchHtml(b, q)).join("");
+  setHtml($("#q-batches"), live.concat(done).map((b) => batchHtml(b, q)).join(""));
   const singles = sortQueue(q.items);
   $("#q-singles").hidden = !singles.length && q.batches.length > 0;
-  $("#q-body").innerHTML = singles.length ? singles.map(queueRow).join("")
-    : `<tr><td colspan="6" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`;
+  setHtml($("#q-body"), singles.length ? singles.map(queueRow).join("")
+    : `<tr><td colspan="6" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`);
+}
+// Clic sur le nom d'une recherche : ouvre ou ferme son détail (pas si l'on vient de sélectionner du texte)
+function toggleItem(e) {
+  const n = e.target.closest(".qname");
+  if (!n) return false;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return true;
+  const id = +n.closest("tr[data-item]").dataset.item;
+  state.openItems.has(id) ? state.openItems.delete(id) : state.openItems.add(id);
+  loadQueue();
+  return true;
 }
 
 $("#q-batches").addEventListener("click", async (e) => {
+  if (toggleItem(e)) return;
   const card = e.target.closest("[data-batch]");
   if (!card) return;
   const id = card.dataset.batch;
@@ -563,6 +615,7 @@ $("#q-batches").addEventListener("click", async (e) => {
   }
 });
 $("#q-body").addEventListener("click", async (e) => {
+  if (toggleItem(e)) return;
   const b = e.target.closest("[data-rm]");
   if (!b) return;
   await api(`/api/queue/${b.dataset.rm}`, { method: "DELETE" });

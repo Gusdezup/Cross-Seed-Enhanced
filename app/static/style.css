@@ -517,3 +517,16 @@ table.rel td:nth-child(2) { min-width: 260px; }
 table.queue .c-when { width: 110px; white-space: nowrap; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
 .res-sub { margin-top: 2px; line-height: 1.3; }
+
+/* file : détail d'une recherche */
+tr.qdetail td { background: var(--raised); }
+tr.qdetail .kv { grid-template-columns: max-content 1fr; font-size: 12.5px; }
+tr.qdetail .kv dt { font-family: var(--sans); }
+tr.qdetail .kv dd { font-family: var(--sans); overflow-wrap: anywhere; }
+.qname { user-select: text; }
+@media (max-width: 700px) {
+  table.queue tr.qdetail { display: block; padding: 10px 12px; }
+  table.queue tr.qdetail td { display: block; background: none; }
+  tr.qdetail .kv { grid-template-columns: 1fr; gap: 2px; }
+  tr.qdetail .kv dd { margin-bottom: 6px; }
+}
