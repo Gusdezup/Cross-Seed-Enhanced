@@ -436,6 +436,28 @@ def _kind(raw: str) -> str:
     return "other"
 
 
+def pending_dir():
+    """Dossier des torrents trouvés mais non injectés. v6 : cross-seeds/ (outputDir null).
+    v7 : outputDir, obligatoire, lu dans ses réglages ; un chemin /config/... du conteneur
+    cross-seed correspond au dossier de config monté ici."""
+    if config.XS_VERSION == "7":
+        con = _connect()
+        if con:
+            try:
+                row = con.execute("SELECT settings_json FROM settings LIMIT 1").fetchone()
+                out = (json.loads(row[0]) if row and row[0] else {}).get("outputDir") or ""
+            except (sqlite3.Error, ValueError):
+                out = ""
+            finally:
+                con.close()
+            out = out.rstrip("/")
+            if out == "/config":
+                return config.XS_CONFIG_DIR
+            if out.startswith("/config/"):
+                return config.XS_CONFIG_DIR / out[len("/config/"):]
+    return config.PENDING_DIR
+
+
 def useful_settings() -> dict:
     """{clé: {"value": str, "kind": string|number|boolean|empty|other}}"""
     if config.XS_VERSION == "7":

@@ -74,7 +74,7 @@ async def status():
         "config": config.XS_CONFIG_JS.exists(),
         "logs": config.LOGS_DIR.is_dir(),
         "db": config.XS_DB.exists(),
-        "pending_dir": config.PENDING_DIR.is_dir(),
+        "pending_dir": xsdb.pending_dir().is_dir(),
     }
     return out
 
@@ -422,23 +422,25 @@ PENDING_RE = re.compile(r"^\[(?P<type>[^\]]+)\]\[(?P<tracker>[^\]]+)\](?P<name>.
 @app.get("/api/pending")
 async def pending():
     items = []
-    if config.PENDING_DIR.is_dir():
-        for p in sorted(config.PENDING_DIR.glob("*.torrent"), key=lambda x: x.stat().st_mtime, reverse=True):
+    pdir = await asyncio.to_thread(xsdb.pending_dir)
+    if pdir.is_dir():
+        for p in sorted(pdir.glob("*.torrent"), key=lambda x: x.stat().st_mtime, reverse=True):
             m = PENDING_RE.match(p.name)
             info = m.groupdict() if m else {"type": "?", "tracker": "?", "name": p.stem, "hash": ""}
             info.update(file=p.name, size=p.stat().st_size,
                         mtime=datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"))
             info["errors"] = await asyncio.to_thread(logs.errors_for, info["hash"][:8]) if info["hash"] else []
             items.append(info)
-    writable = config.PENDING_DIR.is_dir() and os.access(config.PENDING_DIR, os.W_OK) and not config.READONLY
+    writable = pdir.is_dir() and os.access(pdir, os.W_OK) and not config.READONLY
     return {"items": items, "writable": writable}
 
 
 @app.delete("/api/pending/{filename}")
 async def pending_delete(filename: str):
     config.guard("suppression de fichiers en attente")
-    p = (config.PENDING_DIR / filename).resolve()
-    if p.parent != config.PENDING_DIR.resolve() or p.suffix != ".torrent" or not p.exists():
+    pdir = await asyncio.to_thread(xsdb.pending_dir)
+    p = (pdir / filename).resolve()
+    if p.parent != pdir.resolve() or p.suffix != ".torrent" or not p.exists():
         raise HTTPException(404, "Fichier introuvable")
     try:
         p.unlink()

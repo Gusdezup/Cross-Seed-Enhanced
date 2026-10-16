@@ -56,3 +56,17 @@ def test_v7_indexer_api_mapping_and_last_enabled(monkeypatch):
     asyncio.run(main.indexer_toggle({"key": logs.normalize_url("http://prowlarr:9696/13/api"), "enable": True}))
     assert calls == [("PUT", 2, {"id": 2, "enabled": True})]
     assert main._v7_indexer(url) == {"url": "http://prowlarr:9696/12/api", "apikey": "secret", "enabled": True}
+
+
+def test_v7_pending_dir_follows_output_dir(tmp_path, monkeypatch):
+    db = tmp_path / "cross-seed.db"
+    con = sqlite3.connect(db)
+    con.executescript("""CREATE TABLE settings (settings_json TEXT);
+        INSERT INTO settings VALUES ('{"outputDir":"/config/output"}');""")
+    con.close()
+    monkeypatch.setattr(config, "XS_VERSION", "7")
+    monkeypatch.setattr(config, "XS_DB", db)
+    monkeypatch.setattr(config, "XS_CONFIG_DIR", tmp_path)
+    assert xsdb.pending_dir() == tmp_path / "output"
+    monkeypatch.setattr(config, "XS_VERSION", "6")
+    assert xsdb.pending_dir() == config.PENDING_DIR

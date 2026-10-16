@@ -12,6 +12,6 @@ services:
     volumes:
       # Base et logs cross-seed v7 : lecture seule. Aucune écriture SQLite directe.
       - ${XS_CONFIG_PATH}:/cs-config:ro
-      # Gestion des injections en attente uniquement.
+      # Injections en attente : Output Directory de cross-seed v7 réglé sur /config/cross-seeds.
       - ${XS_CONFIG_PATH}/cross-seeds:/cs-config/cross-seeds
       - ./data:/data
