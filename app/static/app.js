@@ -63,7 +63,7 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
-  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), indexers: [], openBatches: new Set(), batchItems: {},
+  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
 };
 
 // ---------- onglets ----------
@@ -586,6 +586,12 @@ async function loadQueue() {
   else if (q.pending) st = `${q.pending} en attente. Prochaine recherche dans ${fmtDuration(q.next_in)}, fin estimée dans ${fmtDuration(q.eta_seconds)} (une toutes les ${q.delay} s).`;
   else st = `File vide. Une recherche est envoyée toutes les ${q.delay} s quand la file se remplit.`;
   $("#q-state").textContent = st;
+  // une demande en cours s'ouvre d'elle-même la première fois qu'on la voit ; refermée, elle le reste
+  for (const b of q.batches) {
+    if (state.seenBatches.has(b.id)) continue;
+    state.seenBatches.add(b.id);
+    if (!b.finished) state.openBatches.add(b.id);
+  }
   // demandes ouvertes : leur détail est rechargé avec la file
   await Promise.all([...state.openBatches].map(async (id) => {
     if (!q.batches.some((b) => b.id === id)) { state.openBatches.delete(id); return; }
