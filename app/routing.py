@@ -244,13 +244,27 @@ def route_for(category: str) -> list:
     return g["indexers"] if g else []
 
 
+async def _names(infos: dict) -> dict:
+    """{clé: nom affiché} des indexers. cross-seed v7 ne garde pas de nom en base et ses logs
+    n'en donnent pas toujours : on prend alors celui de Prowlarr ou Jackett, comme l'interface."""
+    from . import jackett, prowlarr   # import tardif : jackett et prowlarr importent ce module indirectement
+    data = {"items": [dict(i) for i in infos.values()]}
+    for src in (prowlarr, jackett):
+        try:
+            await src.enrich(data)
+        except Exception:  # noqa: BLE001 — source injoignable : on garde le nom de cross-seed
+            pass
+    return {i["key"]: prowlarr.clean_name(i["name"]) if (i.get("prowlarr") or i.get("jackett")) else i["name"]
+            for i in data["items"]}
+
+
 async def search(item: dict, keys: list) -> dict:
     """Recherche routée d'une release de la file. Renvoie un résultat au format de logs.analyse,
     complété de « routed » (indexers interrogés), « candidates » et « errors »."""
     config.guard("recherche routée")
     entries = {e["key"]: e for e in await asyncio.to_thread(xsdb.torznab_entries) if e["state"] == "active"}
     infos = {i["key"]: i for i in (await asyncio.to_thread(xsdb.indexers))["items"]}
-    names = {k: i["name"] for k, i in infos.items()}
+    names = await _names(infos)
     local = _load_pauses()
     paused = {k: paused_until(infos[k], local) for k in keys if k in infos}
     paused = {k: v for k, v in paused.items() if v}
