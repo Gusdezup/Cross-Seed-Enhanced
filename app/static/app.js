@@ -137,8 +137,8 @@ async function loadHealth() {
     q.title = s.qbit.error || "";
     if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
       x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
-      x.lastChild.textContent = s.xs.ok ? "cross-seed en ligne" : "cross-seed injoignable";
-      x.title = s.xs.error || "";
+      x.lastChild.textContent = s.xs.ok ? `cross-seed v${state.xsVersion} en ligne` : `cross-seed v${state.xsVersion} injoignable`;
+      x.title = s.xs.error || `Version ${state.xsVersion} : ${s.xs_version_source === "XS_VERSION" ? "forcée par XS_VERSION" : "détectée automatiquement"}`;
     }
   } catch { /* le serveur lui-même ne répond pas */ }
 }
@@ -1225,6 +1225,14 @@ function activeIndexers() {
   return state.indexers.length ? state.indexers
     : (idxData ? idxData.items.filter((i) => i.config === "active").map((i) => ({ key: i.key, label: i.name })) : []);
 }
+// Nom d'un indexer coché dans un groupe mais inactif : celui de cross-seed s'il le connaît encore,
+// sinon celui de Prowlarr ou Jackett (indexer retiré, ou suspendu en v6 et non repris par la migration v7).
+function indexerLabel(k) {
+  const d = idxData || {};
+  const hit = (d.items || []).find((i) => i.key === k)
+    || [d.prowlarr, d.jackett].flatMap((b) => (b && b.absent) || []).find((p) => p.key === k);
+  return (hit && hit.name) || k;
+}
 function groupInfoHtml(g) {
   const groups = state.settings.groups;
   const n = state.releases.filter((r) => groupFor(r.category, groups) === g).length;
@@ -1247,10 +1255,11 @@ function renderGroups() {
         <input type="checkbox" data-cat="${esc(c)}" ${on ? "checked" : ""} ${owner ? "disabled" : ""}>${esc(catName(c))}${owner ? ` <small>(${esc(owner.name)})</small>` : ""}</label>`;
     }).join("");
     const known = new Set(idx.map((i) => i.key));
-    const extra = g.indexers.filter((k) => !known.has(k)).map((k) => ({ key: k, label: (idxData && (idxData.items.find((i) => i.key === k) || {}).name) || k, off: true }));
+    const extra = g.indexers.filter((k) => !known.has(k)).map((k) => ({ key: k, label: indexerLabel(k), off: true }));
     const idxBoxes = idx.concat(extra).map((i) => {
       const on = g.indexers.includes(i.key);
-      return `<label class="pick${on ? " on" : ""}${i.off ? " taken" : ""}" style="--c:${trackerColor(i.label)}"${i.off ? ' title="Suspendu ou retiré de config.js : ignoré"' : ""}>
+      const offTitle = state.xsVersion === "7" ? "Désactivé ou absent de cross-seed : ignoré" : "Suspendu ou retiré de config.js : ignoré";
+      return `<label class="pick${on ? " on" : ""}${i.off ? " taken" : ""}" style="--c:${trackerColor(i.label)}"${i.off ? ` title="${offTitle}"` : ""}>
         <input type="checkbox" data-key="${esc(i.key)}" ${on ? "checked" : ""}>${esc(i.label)}${i.off ? " <small>(inactif)</small>" : ""}</label>`;
     }).join("");
     return `<div class="group" data-i="${n}">
