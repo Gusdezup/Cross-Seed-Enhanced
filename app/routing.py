@@ -254,8 +254,12 @@ async def _names(infos: dict) -> dict:
             await src.enrich(data)
         except Exception:  # noqa: BLE001 — source injoignable : on garde le nom de cross-seed
             pass
-    return {i["key"]: prowlarr.clean_name(i["name"]) if (i.get("prowlarr") or i.get("jackett")) else i["name"]
-            for i in data["items"]}
+    # indexers inconnus de cross-seed (désactivés, retirés, ou non repris par la migration v7) : nom de la source
+    out = {p["key"]: prowlarr.clean_name(p["name"])
+           for b in (data.get("prowlarr"), data.get("jackett")) for p in (b or {}).get("absent", [])}
+    out.update({i["key"]: prowlarr.clean_name(i["name"]) if (i.get("prowlarr") or i.get("jackett")) else i["name"]
+                for i in data["items"]})
+    return out
 
 
 async def search(item: dict, keys: list) -> dict:
@@ -268,9 +272,13 @@ async def search(item: dict, keys: list) -> dict:
     local = _load_pauses()
     paused = {k: paused_until(infos[k], local) for k in keys if k in infos}
     paused = {k: v for k, v in paused.items() if v}
-    res = {"found": 0, "injected": [], "failed": [], "exists": [], "matched": [], "skipped": None, "refused": None,
+    # cochés dans le groupe mais désactivés (ou absents) dans cross-seed : ignorés, ce n'est pas une erreur
+    disabled = [k for k in keys if k not in entries]
+    res = {"found": 0, "injected": [], "failed": [], "saved": [], "exists": [], "matched": [], "skipped": None,
+           "refused": None,
+           "disabled": [names.get(k, xsdb.fallback_name(k)) for k in disabled],
            "routed": [names.get(k, xsdb.fallback_name(k)) for k in keys
-                      if k not in paused and k not in set(item.get("skip") or [])],
+                      if k not in paused and k not in disabled and k not in set(item.get("skip") or [])],
            "seeded": [names.get(k, k) for k in keys if k in set(item.get("skip") or []) and k not in paused],
            "paused": [f"{names.get(k, k)} (jusqu'à {datetime.fromtimestamp(v).strftime('%H:%M')})" for k, v in paused.items()],
            "candidates": 0, "errors": [], "searched": []}
@@ -279,13 +287,10 @@ async def search(item: dict, keys: list) -> dict:
     sent = []
     skip = set(item.get("skip") or [])
     for key in keys:
-        if key in paused or key in skip:
+        if key in paused or key in skip or key in disabled:
             continue
         name = names.get(key, xsdb.fallback_name(key))
-        entry = entries.get(key)
-        if not entry:
-            res["errors"].append(f"{name} : suspendu ou absent de config.js")
-            continue
+        entry = entries[key]
         try:
             cands = plausible(await search_indexer(entry["url"], params), item.get("size") or 0)
         except RateLimited as e:
@@ -317,12 +322,13 @@ async def search(item: dict, keys: list) -> dict:
             text = ""
         text = re.sub(r"\x1b\[[0-9;]*m", "", text)   # couleurs éventuelles
         lines = text.splitlines()
+        save = (xsdb.useful_settings().get("action") or {}).get("value", "").strip("\"'`") == "save"
         for title, tracker, status in sent:
-            res[classify(title, status, lines, text)].append(tracker)
+            res[classify(title, status, lines, text, save)].append(tracker)
     return res
 
 
-def classify(title: str, status: int, lines: list, text: str) -> str:
+def classify(title: str, status: int, lines: list, text: str, save: bool = False) -> str:
     """Issue d'un résultat soumis à cross-seed, d'après ses logs. « injected » seulement si cross-seed
     l'écrit (« … - injected ») : un HTTP 200 veut dire « correspondance trouvée », injectée ou déjà
     présente, et ne suffit pas. Sans ligne reconnue : « matched » (trouvé, non confirmé)."""
@@ -332,7 +338,9 @@ def classify(title: str, status: int, lines: list, text: str) -> str:
         return "injected"
     if re.search(r"already exists", mine, re.I) or re.search(r"Already exists " + re.escape(title), text):
         return "exists"
-    if status == 202 or re.search(r"failed to inject|not complete|-\s*saved\b", mine, re.I) \
-            or re.search(r"Saved " + re.escape(title), text):
+    saved = re.search(r"-\s*saved\b", mine, re.I) or re.search(r"Saved " + re.escape(title), text)
+    if save and status == 200:
+        return "saved"   # action « save » : le .torrent est enregistré dans outputDir, c'est le résultat voulu
+    if status == 202 or saved or re.search(r"failed to inject|not complete", mine, re.I):
         return "failed"
     return "matched"

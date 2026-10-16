@@ -397,6 +397,7 @@ $("#rel-sort").addEventListener("change", (e) => {
 });
 
 // ---------- file de recherche ----------
+const SAVED_TIP = "cross-seed est réglé sur action « save » : il a enregistré le .torrent dans son outputDir, sans l'injecter";
 const SKIP_WORDS = [
   [/temporarily disabled indexers/g, "indexers en pause"],
   [/timestamps/g, "déjà cherchée récemment"],
@@ -420,6 +421,8 @@ function resultHtml(i) {
   if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ` +
     r.injected.map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" "));
   if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection sur ${esc(r.failed.join(", "))}</span>`);
+  if ((r.saved || []).length) parts.push(`<span class="res-hit" title="${SAVED_TIP}">.torrent enregistré :</span> ` +
+    r.saved.map((t) => `<span class="chip" style="--c:${trackerColor(t)}">${esc(t)}</span>`).join(" "));
   if (!parts.length) {
     if (r.skipped && !r.found) parts.push(`<span class="res-warn">Sautée : ${esc(explainSkip(r.skipped))}</span>`);
     else parts.push(`<span class="res-none">${r.found ? `${r.found} trouvé(s), rien de nouveau` : "Rien trouvé"}</span>`);
@@ -433,6 +436,7 @@ function routedResultHtml(r) {
   const parts = [];
   if (r.injected.length) parts.push(`<span class="res-hit">${r.injected.length} injecté${r.injected.length > 1 ? "s" : ""} :</span> ${chips(r.injected)}`);
   if (r.failed.length) parts.push(`<span class="res-bad">échec d'injection :</span> ${chips(r.failed)}`);
+  if ((r.saved || []).length) parts.push(`<span class="res-hit" title="${SAVED_TIP}">.torrent enregistré :</span> ${chips(r.saved)}`);
   if ((r.matched || []).length) parts.push(`<span class="res-warn" title="cross-seed a répondu « correspondance trouvée », mais ses logs ne disent pas s'il l'a injectée ou s'il l'avait déjà">trouvé, non confirmé :</span> ${chips(r.matched)}`);
   if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
   if (!parts.length && !r.routed.length && seededOrPaused(r)) parts.push(`<span class="res-none">${(r.paused || []).length ? "Non cherchée : indexers en pause ou déjà en seed" : "Rien à chercher : déjà en seed sur tous les indexers routés"}</span>`);
@@ -443,6 +447,7 @@ function routedResultHtml(r) {
   const tip = `Recherche routée sur : ${r.routed.join(", ") || "aucun"}`
     + (seeded.length ? `\n\nDéjà en seed, non interrogés : ${seeded.join(", ")}` : "")
     + (paused.length ? `\n\nEn pause, non interrogés :\n${paused.join("\n")}` : "")
+    + ((r.disabled || []).length ? `\n\nDésactivés dans cross-seed, non interrogés : ${r.disabled.join(", ")}` : "")
     + (r.errors.length ? `\n\nErreurs :\n${r.errors.join("\n")}` : "");
   let meta = `${asked} indexer${asked > 1 ? "s" : ""}`;
   if (paused.length) meta += ` · ${paused.length} en pause`;
@@ -461,7 +466,7 @@ function queueRow(i) {
       <td>${src}</td>
       <td>${resultHtml(i)}</td>
       <td class="c-when">${queueWhen(i)}</td>
-      <td class="c-act">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}</td>
+      <td class="c-act"><div class="btns">${i.status === "pending" ? `<button class="small danger" data-rm="${i.id}">Retirer</button>` : ""}<button class="small ghost" data-idetail>${open ? "Masquer" : "Détail"}</button></div></td>
     </tr>` + (open ? `<tr class="detail qdetail"><td colspan="6">${queueDetail(i)}</td></tr>` : "");
 }
 // Détail d'une recherche de la file (clic sur son nom)
@@ -476,17 +481,20 @@ function queueDetail(i) {
     rows.push(["Trackers interrogés", list(r.routed)]);
     if ((r.seeded || []).length) rows.push(["Non interrogés : déjà en seed", list(r.seeded)]);
     if ((r.paused || []).length) rows.push(["Non interrogés : en pause", list(r.paused)]);
+    if ((r.disabled || []).length) rows.push(["Non interrogés : désactivés dans cross-seed", list(r.disabled)]);
     rows.push(["Résultats examinés", String(r.candidates ?? 0)]);
     rows.push(["Injectés", list(r.injected)]);
     if ((r.matched || []).length) rows.push(["Trouvés, non confirmés", list(r.matched)]);
     if ((r.exists || []).length) rows.push(["Déjà présents", list(r.exists)]);
     if ((r.failed || []).length) rows.push(["Échec d'injection", list(r.failed)]);
+    if ((r.saved || []).length) rows.push([".torrent enregistré (outputDir)", list(r.saved)]);
     if ((r.errors || []).length) rows.push(["Erreurs", r.errors.map(esc).join("<br>")]);
   } else if (i.result) {
     rows.push(["Recherche", "cross-seed, sur tous ses indexers"]);
     rows.push(["Torrents trouvés", String(r.found ?? "—")]);
     rows.push(["Injectés", list(r.injected)]);
     if ((r.failed || []).length) rows.push(["Échec d'injection", list(r.failed)]);
+    if ((r.saved || []).length) rows.push([".torrent enregistré (outputDir)", list(r.saved)]);
     if (r.skipped) rows.push(["Sautée", esc(explainSkip(r.skipped))]);
     if (r.refused) rows.push(["Refusée", esc(r.refused)]);
   }
@@ -512,6 +520,12 @@ function queueWhen(i) {
     : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   return `<span title="${esc(d.toLocaleString("fr-FR"))}">${i.status === "running" ? `depuis ${txt}` : txt}</span>`;
 }
+// Dans une demande : de haut en bas dans l'ordre de passage (terminées, puis en cours, puis à venir)
+const sortBatch = (items) => {
+  const order = { running: 1, pending: 2 };
+  return [...items].sort((a, b) => (order[a.status] ?? 0) - (order[b.status] ?? 0)
+    || ((order[a.status] ?? 0) === 0 ? (a.done || 0) - (b.done || 0) : 0));
+};
 const sortQueue = (items) => {
   const order = { running: 0, pending: 1 };
   return [...items].sort((a, b) =>
@@ -541,7 +555,7 @@ function batchHtml(b, q) {
   const items = state.batchItems[b.id];
   const detail = !open ? "" : `<div class="b-items">${items ? `<div class="table-wrap"><table class="queue">
       <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th class="c-when">Date</th><th></th></tr></thead>
-      <tbody>${sortQueue(items).map(queueRow).join("") || `<tr><td colspan="6" class="empty">Plus aucune recherche de cette demande dans la file.</td></tr>`}</tbody></table></div>`
+      <tbody>${sortBatch(items).map(queueRow).join("") || `<tr><td colspan="6" class="empty">Plus aucune recherche de cette demande dans la file.</td></tr>`}</tbody></table></div>`
     : `<p class="muted">Chargement…</p>`}</div>`;
   return `<div class="batch${live ? "" : " finished"}" data-batch="${esc(b.id)}">
     <div class="b-head">
@@ -586,10 +600,10 @@ async function loadQueue() {
 }
 // Clic sur le nom d'une recherche : ouvre ou ferme son détail (pas si l'on vient de sélectionner du texte)
 function toggleItem(e) {
-  const n = e.target.closest(".qname");
+  const n = e.target.closest(".qname, [data-idetail]");
   if (!n) return false;
   const sel = window.getSelection();
-  if (sel && !sel.isCollapsed) return true;
+  if (n.matches(".qname") && sel && !sel.isCollapsed) return true;
   const id = +n.closest("tr[data-item]").dataset.item;
   state.openItems.has(id) ? state.openItems.delete(id) : state.openItems.add(id);
   loadQueue();

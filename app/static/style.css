@@ -535,3 +535,6 @@ tr.qdetail .kv dd { font-family: var(--sans); overflow-wrap: anywhere; }
   tr.qdetail .kv { grid-template-columns: 1fr; gap: 2px; }
   tr.qdetail .kv dd { margin-bottom: 6px; }
 }
+/* File : « Retirer » et « Détail » côte à côte */
+table.queue .c-act { width: 170px; }
+table.queue td.c-act .btns { justify-content: flex-end; flex-wrap: nowrap; }

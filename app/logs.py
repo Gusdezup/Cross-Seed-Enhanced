@@ -104,7 +104,7 @@ def analyse(text: str, payload: dict):
     ident = _ident_pattern(payload)
     if not ident:
         return None
-    res = {"found": None, "injected": [], "failed": [], "skipped": None, "refused": None}
+    res = {"found": None, "injected": [], "failed": [], "saved": [], "skipped": None, "refused": None}
 
     for m in re.finditer(r"Found .+? on (.+?) by \S+ from \S+ \((.*?)\) - injected", text):
         if re.search(ident, m.group(2)):
@@ -112,6 +112,10 @@ def analyse(text: str, payload: dict):
     for m in re.finditer(r"Found .+? on (.+?) by \S+ from \S+ \((.*?)\) - failed to inject", text):
         if re.search(ident, m.group(2)):
             res["failed"].append(m.group(1))
+    # action « save » : cross-seed enregistre le .torrent (outputDir) au lieu de l'injecter
+    for m in re.finditer(r"Found .+? on (.+?) by \S+ from \S+ \((.*?)\) - saved", text):
+        if re.search(ident, m.group(2)):
+            res["saved"].append(m.group(1))
     m = re.search(r"Skipped searching on indexers for [^\n]*?" + ident + r"[^\n]*?\(filtered by ([^)]*)\)", text)
     if m:
         res["skipped"] = m.group(1)
