@@ -220,9 +220,26 @@
     <!-- 3. RÉGLAGES -->
     <section id="tab-settings" class="tab" hidden>
       <nav class="toc" aria-label="Sections des réglages">
-        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-rules">Passer en premier</a>
-        <a href="#settings" data-goto="set-indexers">Indexers</a><a href="#settings" data-goto="sources-h">Sources</a><a href="#settings" data-goto="set-xs">cross-seed</a>
+        <a href="#settings" data-goto="set-indexers">Indexers</a><a href="#settings" data-goto="sources-h">Sources</a>
+        <a href="#settings" data-goto="set-groups">Groupes</a><a href="#settings" data-goto="set-rules">Passer en premier</a><a href="#settings" data-goto="set-xs">cross-seed</a>
       </nav>
+      <div class="queue-head" id="set-indexers">
+        <div>
+          <h2>Indexers</h2>
+          <p class="muted" id="idx-intro">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
+        </div>
+        <div class="btns">
+          <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
+          <button class="primary" id="idx-restart" hidden>Redémarrer cross-seed pour appliquer</button>
+        </div>
+      </div>
+      <div id="idx-list"></div>
+
+      <h2 id="sources-h">Sources d'indexers</h2>
+      <p class="muted" id="src-intro">Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à saisir si tes lignes torznab pointent déjà vers eux : l'adresse et la clé en sont déduites. Sinon, renseigne-les ici. L'adresse est écrite telle quelle dans config.js : elle doit être joignable par cross-seed comme par cette interface. Une valeur définie dans le .env reste prioritaire.</p>
+      <div class="sources" id="sources"></div>
+      <div class="savebar"><button class="primary" id="src-save">Enregistrer les sources</button></div>
+
       <h2 id="set-groups">Groupes de trackers</h2>
       <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible de « Selon le groupe » dans Chercher et du bouton « Chercher » d'une release. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
       <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed, son RSS et son announce ne sont pas concernés.</p>
@@ -252,23 +269,6 @@
       <div id="aliases" class="aliases"></div>
 
       <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>
-
-      <div class="queue-head" id="set-indexers">
-        <div>
-          <h2>Indexers</h2>
-          <p class="muted" id="idx-intro">« Suspendre » met la ligne de l'indexer en commentaire dans config.js, « Retirer » la supprime, « Ajouter » (listes Prowlarr et Jackett) l'écrit. Chaque modification sauvegarde config.js et ne s'applique qu'après redémarrage de cross-seed.</p>
-        </div>
-        <div class="btns">
-          <label class="check"><input type="checkbox" id="idx-retired"> <span id="idx-retired-lbl">Afficher les indexers retirés</span></label>
-          <button class="primary" id="idx-restart" hidden>Redémarrer cross-seed pour appliquer</button>
-        </div>
-      </div>
-      <div id="idx-list"></div>
-
-      <h2 id="sources-h">Sources d'indexers</h2>
-      <p class="muted" id="src-intro">Prowlarr et Jackett permettent d'ajouter des indexers à cross-seed depuis l'onglet Indexers. Rien à saisir si tes lignes torznab pointent déjà vers eux : l'adresse et la clé en sont déduites. Sinon, renseigne-les ici. L'adresse est écrite telle quelle dans config.js : elle doit être joignable par cross-seed comme par cette interface. Une valeur définie dans le .env reste prioritaire.</p>
-      <div class="sources" id="sources"></div>
-      <div class="savebar"><button class="primary" id="src-save">Enregistrer les sources</button></div>
 
       <h2 id="set-xs">cross-seed</h2>
       <p class="muted" id="xs-intro">Réglages de config.js. Seule la valeur de chaque ligne est modifiée (commentaires conservés) et une copie de sauvegarde est faite dans data/backups. cross-seed ne les prend en compte qu'après un redémarrage.</p>
