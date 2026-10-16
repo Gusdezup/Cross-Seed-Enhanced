@@ -1,4 +1,4 @@
-"""Accès aux API qBittorrent (clé API, qBit >= 5.2) et cross-seed (v6)."""
+"""Accès aux API qBittorrent et cross-seed v6/v7."""
 import time
 
 import httpx
@@ -40,6 +40,25 @@ async def xs_ping() -> bool:
     r = await _http.get(f"{config.XS_URL}/api/ping",
                         headers={"X-Api-Key": config.XS_APIKEY}, timeout=8)
     return r.status_code < 400
+
+
+async def xs_indexers_v7() -> list:
+    r = await _http.get(f"{config.XS_URL}/api/indexer/v1",
+                        headers={"X-Api-Key": config.XS_APIKEY}, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+async def xs_indexer_v7(method: str, indexer_id: int | None = None, body: dict | None = None) -> dict:
+    config.guard("modification des indexers cross-seed")
+    url = f"{config.XS_URL}/api/indexer/v1"
+    if indexer_id is not None:
+        url += f"/{indexer_id}"
+    r = await _http.request(method, url, json=body, headers={"X-Api-Key": config.XS_APIKEY}, timeout=20)
+    if r.status_code >= 400:
+        raise RuntimeError(f"cross-seed a répondu HTTP {r.status_code} : {r.text[:200]}")
+    # La réponse cross-seed contient l'apikey de l'indexer : ne jamais la relayer au navigateur.
+    return {"changed": True}
 
 
 async def xs_webhook(payload: dict) -> int:

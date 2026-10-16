@@ -74,6 +74,11 @@ body.ro-cfg #idx-list [data-toggle], body.ro-cfg #idx-list [data-remove],
 body.ro-cfg #idx-list [data-add], body.ro-cfg #idx-list [data-add-jackett], body.ro-cfg #xs-save {
   opacity: .4; pointer-events: none;
 }
+/* En v7, les indexers passent par l'API : l'absence d'écriture config.js ne les bloque pas. */
+body.ro-cfg.xs-v7 #idx-list [data-toggle], body.ro-cfg.xs-v7 #idx-list [data-remove],
+body.ro-cfg.xs-v7 #idx-list [data-add], body.ro-cfg.xs-v7 #idx-list [data-add-jackett] {
+  opacity: 1; pointer-events: auto;
+}
 .shell { display: grid; grid-template-columns: 210px 1fr; min-height: calc(100vh - 53px); }
 .rail { border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
 .rail a {
