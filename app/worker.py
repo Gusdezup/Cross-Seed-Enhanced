@@ -18,6 +18,26 @@ from . import clients, config, logs, routing, scan
 _ids = itertools.count(1)
 
 
+
+def outcome(i: dict) -> str:
+    """Issue d'une recherche, pour le filtre de la file. Un résultat peut mêler plusieurs issues
+    (injecté sur un tracker, échec sur un autre) : la plus utile l'emporte, dans cet ordre.
+    live : en attente ou en cours ; hit : injecté (ou .torrent enregistré en action « save ») ;
+    bad : échec d'injection, erreur, sans réponse ; found : déjà en seed ou non confirmé ;
+    none : rien trouvé, sautée ou refusée."""
+    if i.get("status") in ("pending", "running"):
+        return "live"
+    if i.get("status") in ("error", "timeout"):
+        return "bad"
+    r = i.get("result") or {}
+    if r.get("injected") or r.get("saved"):
+        return "hit"
+    if r.get("failed") or r.get("errors"):
+        return "bad"
+    if r.get("matched") or r.get("exists") or (not r.get("routed") and r.get("found")):
+        return "found"
+    return "none"
+
 class SearchQueue:
     def __init__(self):
         self.items: list = []
@@ -210,12 +230,17 @@ class SearchQueue:
         order = [i for i in self.items if i["status"] == "pending"]
         first = next((n for n, i in enumerate(order) if i.get("batch") == b["id"]), None)
         last = max((n for n, i in enumerate(order) if i.get("batch") == b["id"]), default=None)
-        return b | {"pending": pending, "running": running,
+        outcomes = {}
+        for i in mine:
+            o = outcome(i)
+            outcomes[o] = outcomes.get(o, 0) + 1
+        return b | {"pending": pending, "running": running, "outcomes": outcomes,
                     "starts_in": None if first is None else first * delay,
                     "eta_seconds": None if last is None else (last + 1) * delay}
 
-    def batch_items(self, bid: str) -> list:
-        return [self._item_view(i) for i in self.items if i.get("batch") == bid]
+    def batch_items(self, bid: str, only: str | None = None) -> list:
+        return [self._item_view(i) for i in self.items
+                if i.get("batch") == bid and (not only or outcome(i) == only)]
 
     # --- boucle de traitement ---
     async def run(self):

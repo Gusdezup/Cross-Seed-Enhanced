@@ -396,10 +396,10 @@ async def queue_action(action: str):
 
 
 @app.get("/api/queue/batch/{bid}")
-async def queue_batch(bid: str):
+async def queue_batch(bid: str, outcome: str | None = None):
     if bid not in queue.batches:
         raise HTTPException(404, "Demande inconnue")
-    return {"items": queue.batch_items(bid)}
+    return {"items": queue.batch_items(bid, outcome)}
 
 
 @app.delete("/api/queue/batch/{bid}")

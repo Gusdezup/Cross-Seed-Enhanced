@@ -63,7 +63,7 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
-  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), openPending: new Set(), indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
+  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), openPending: new Set(), qFilter: "all", indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
 };
 
 // ---------- onglets ----------
@@ -543,7 +543,7 @@ function batchStatus(b, q) {
   if (b.running || !b.starts_in) return `en cours${end}`;
   return `démarre dans ${fmtDuration(b.starts_in)}${end}`;
 }
-function batchHtml(b, q) {
+function batchHtml(b, q, filtering = false) {
   const pct = b.total ? Math.round((100 * b.done) / b.total) : 0;
   const live = !b.finished;
   const stats = [`${b.done}/${b.total}`];
@@ -551,8 +551,8 @@ function batchHtml(b, q) {
   if (b.errors) stats.push(`<span class="res-bad">${b.errors} erreur${b.errors > 1 ? "s" : ""}</span>`);
   if (b.dropped) stats.push(`${b.dropped} retirée${b.dropped > 1 ? "s" : ""} avant de partir`);
   stats.push(esc(batchStatus(b, q)));
-  const open = state.openBatches.has(b.id);
-  const items = state.batchItems[b.id];
+  const open = filtering || state.openBatches.has(b.id);
+  const items = state.batchItems[b.id] && (filtering ? state.batchItems[b.id].filter(qKeep) : state.batchItems[b.id]);   // déjà filtrées par le serveur ; le filtre local couvre un changement de filtre en cours
   const detail = !open ? "" : `<div class="b-items">${items ? `<div class="table-wrap"><table class="queue">
       <thead><tr><th>Statut</th><th>Release</th><th>Origine</th><th>Résultat</th><th class="c-when">Date</th><th></th></tr></thead>
       <tbody>${sortBatch(items).map(queueRow).join("") || `<tr><td colspan="6" class="empty">Plus aucune recherche de cette demande dans la file.</td></tr>`}</tbody></table></div>`
@@ -561,7 +561,7 @@ function batchHtml(b, q) {
     <div class="b-head">
       <div class="b-title">${esc(b.label)} <span class="b-to">→ ${esc(b.detail || "selon le groupe")}</span></div>
       <div class="btns">
-        <button class="small ghost" data-bdetail>${open ? "Masquer" : "Détail"}</button>
+        ${filtering ? "" : `<button class="small ghost" data-bdetail>${open ? "Masquer" : "Détail"}</button>`}
         ${b.pending ? `<button class="small danger" data-bcancel>Annuler</button>` : ""}
       </div>
     </div>
@@ -570,6 +570,43 @@ function batchHtml(b, q) {
     ${detail}
   </div>`;
 }
+
+// ---------- file : filtre par issue ----------
+// Issue d'une recherche, pour le filtre : même règle que outcome() dans worker.py
+function itemOutcome(i) {
+  if (i.status === "pending" || i.status === "running") return "live";
+  if (i.status === "error" || i.status === "timeout") return "bad";
+  const r = i.result || {};
+  if ((r.injected || []).length || (r.saved || []).length) return "hit";
+  if ((r.failed || []).length || (r.errors || []).length) return "bad";
+  if ((r.matched || []).length || (r.exists || []).length || (!r.routed && r.found)) return "found";
+  return "none";
+}
+const QFILTERS = [["all", "Tout"], ["hit", "Injectés"], ["found", "Trouvés sans injection"],
+  ["none", "Rien trouvé"], ["bad", "Erreurs"], ["live", "En attente ou en cours"]];
+const QFILTER_TIP = {
+  found: "Déjà en seed, ou trouvé mais non confirmé dans les logs de cross-seed",
+  bad: "Échec d'injection, erreur d'un indexer, ou recherche sans réponse",
+  none: "Rien trouvé, sautée ou refusée par cross-seed",
+};
+const qKeep = (i) => state.qFilter === "all" || itemOutcome(i) === state.qFilter;
+function renderFilter(singles, batches) {
+  const n = Object.fromEntries(QFILTERS.map(([k]) => [k, 0]));
+  for (const i of singles) { n.all++; n[itemOutcome(i)]++; }
+  for (const b of batches) for (const [k, v] of Object.entries(b.outcomes || {})) { n.all += v; n[k] += v; }
+  setHtml($("#q-filter"), QFILTERS.map(([k, label]) => `<button type="button" data-qf="${k}" class="${state.qFilter === k ? "on" : ""}"
+      ${QFILTER_TIP[k] ? `title="${esc(QFILTER_TIP[k])}"` : ""}${k !== "all" && !n[k] && state.qFilter !== k ? " disabled" : ""}>${label} <b>${n[k]}</b></button>`).join(""));
+  $("#q-filter").hidden = !n.all;
+}
+$("#q-filter").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-qf]");
+  if (!b) return;
+  state.qFilter = b.dataset.qf;
+  try { localStorage.setItem("xse.qFilter", state.qFilter); } catch { /* stockage indisponible */ }
+  loadQueue();
+});
+try { state.qFilter = localStorage.getItem("xse.qFilter") || "all"; } catch { /* stockage indisponible */ }
+if (!QFILTERS.some(([k]) => k === state.qFilter)) state.qFilter = "all";
 
 async function loadQueue() {
   try { state.queue = await api("/api/queue"); } catch { return; }
@@ -592,17 +629,25 @@ async function loadQueue() {
     state.seenBatches.add(b.id);
     if (!b.finished) state.openBatches.add(b.id);
   }
-  // demandes ouvertes : leur détail est rechargé avec la file
-  await Promise.all([...state.openBatches].map(async (id) => {
-    if (!q.batches.some((b) => b.id === id)) { state.openBatches.delete(id); return; }
-    try { state.batchItems[id] = (await api(`/api/queue/batch/${id}`)).items; } catch { /* demande supprimée */ }
-  }));
+  for (const id of [...state.openBatches]) if (!q.batches.some((b) => b.id === id)) state.openBatches.delete(id);
   const live = q.batches.filter((b) => !b.finished), done = q.batches.filter((b) => b.finished).slice(0, 10);
-  setHtml($("#q-batches"), live.concat(done).map((b) => batchHtml(b, q)).join(""));
-  const singles = sortQueue(q.items);
-  $("#q-singles").hidden = !singles.length && q.batches.length > 0;
+  const shown = live.concat(done);
+  const filtering = state.qFilter !== "all";
+  // filtre actif : seules les demandes qui ont une recherche concernée (comptées par le serveur),
+  // dépliées sur ces seules recherches
+  const batches = filtering ? shown.filter((b) => (b.outcomes || {})[state.qFilter]) : shown;
+  const f = filtering ? `?outcome=${state.qFilter}` : "";
+  await Promise.all(batches.filter((b) => filtering || state.openBatches.has(b.id)).map(async (b) => {
+    try { state.batchItems[b.id] = (await api(`/api/queue/batch/${b.id}${f}`)).items; } catch { /* demande supprimée */ }
+  }));
+  renderFilter(q.items, shown);
+  setHtml($("#q-batches"), batches.map((b) => batchHtml(b, q, filtering)).join(""));
+  const singles = sortQueue(q.items.filter(qKeep));
+  $("#q-singles").hidden = !singles.length && (q.batches.length > 0 || filtering);
   setHtml($("#q-body"), singles.length ? singles.map(queueRow).join("")
     : `<tr><td colspan="6" class="empty">Rien dans la file. Lance une recherche depuis <a href="#search">Chercher</a>.</td></tr>`);
+  if (filtering && !batches.length && !singles.length)
+    setHtml($("#q-batches"), `<p class="empty">Aucune recherche ne correspond à ce filtre.</p>`);
 }
 // Clic sur le nom d'une recherche : ouvre ou ferme son détail (pas si l'on vient de sélectionner du texte)
 function toggleItem(e) {
@@ -917,7 +962,7 @@ async function loadPending() {
   }
   $("#pending-list").innerHTML =
     (todo.length ? `<h3 class="p-sec">À regarder <b>${todo.length}</b></h3>${todo.map(card).join("")}`
-      : `<p class="empty">Aucun échec d'injection.</p>`)
+      : `<p class="muted">Aucun échec d'injection.</p>`)
     + (later.length ? `<h3 class="p-sec">Se règlent tout seuls <b>${later.length}</b></h3>
         <p class="muted">Source pas encore terminée, ou torrent déjà dans qBittorrent : cross-seed s'en occupe à son prochain passage.</p>${later.map(card).join("")}` : "")
     + (d.writable ? "" : state.readonly
