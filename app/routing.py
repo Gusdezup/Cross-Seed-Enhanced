@@ -315,30 +315,44 @@ async def search(item: dict, keys: list) -> dict:
                 res["found"] += 1
                 sent.append((c["title"], tracker, status))
     if sent:
-        await asyncio.sleep(2)   # laisse à cross-seed le temps d'écrire ses logs
-        try:
-            text, _, _ = await asyncio.to_thread(logs.read_from, "info", offset, ident)
-        except OSError:
-            text = ""
-        text = re.sub(r"\x1b\[[0-9;]*m", "", text)   # couleurs éventuelles
-        lines = text.splitlines()
         save = (xsdb.useful_settings().get("action") or {}).get("value", "").strip("\"'`") == "save"
-        for title, tracker, status in sent:
-            res[classify(title, status, lines, text, save)].append(tracker)
+        # cross-seed écrit sa ligne une fois l'injection faite, parfois plusieurs secondes après
+        # (qBittorrent occupé, scan en cours) : on relit ses logs jusqu'à ce que tout soit tranché
+        for wait in LOG_WAITS:
+            await asyncio.sleep(wait)
+            try:
+                text, _, _ = await asyncio.to_thread(logs.read_from, "info", offset, ident)
+            except OSError:
+                text = ""
+            text = re.sub(r"\x1b\[[0-9;]*m", "", text)   # couleurs éventuelles
+            lines = text.splitlines()
+            outcome = [classify(title, status, lines, text, save) for title, _, status in sent]
+            if "matched" not in outcome:
+                break
+        for (_, tracker, _), o in zip(sent, outcome):
+            res[o].append(tracker)
     return res
+
+
+LOG_WAITS = (2, 3, 5, 10, 10)   # relectures des logs : environ 30 s au plus
+
+
+EXT = r"(?:\.(?:mkv|mp4|avi|m2ts|ts|iso|flac|mp3|m4a|zip|rar))?"   # extension éventuelle après le titre
 
 
 def classify(title: str, status: int, lines: list, text: str, save: bool = False) -> str:
     """Issue d'un résultat soumis à cross-seed, d'après ses logs. « injected » seulement si cross-seed
     l'écrit (« … - injected ») : un HTTP 200 veut dire « correspondance trouvée », injectée ou déjà
     présente, et ne suffit pas. Sans ligne reconnue : « matched » (trouvé, non confirmé)."""
-    own = re.compile(re.escape(title) + r"(?![\w.\-])")   # ce titre exactement, pas un titre plus long
+    # ce titre exactement, pas un titre plus long ; cross-seed y ajoute souvent l'extension du
+    # fichier (titre Torznab « …-KAF », log « …-KAF.mkv »)
+    own = re.compile(re.escape(title) + EXT + r"(?![\w.\-])")
     mine = "\n".join(l for l in lines if own.search(l))
     if re.search(r"-\s*injected\b", mine, re.I):
         return "injected"
-    if re.search(r"already exists", mine, re.I) or re.search(r"Already exists " + re.escape(title), text):
+    if re.search(r"already exists", mine, re.I) or re.search(r"Already exists " + re.escape(title) + EXT, text):
         return "exists"
-    saved = re.search(r"-\s*saved\b", mine, re.I) or re.search(r"Saved " + re.escape(title), text)
+    saved = re.search(r"-\s*saved\b", mine, re.I) or re.search(r"Saved " + re.escape(title) + EXT, text)
     if save and status == 200:
         return "saved"   # action « save » : le .torrent est enregistré dans outputDir, c'est le résultat voulu
     if status == 202 or saved or re.search(r"failed to inject|not complete", mine, re.I):
