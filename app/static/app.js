@@ -904,14 +904,26 @@ $("#s-go").addEventListener("click", async (e) => {
 async function loadPending() {
   let d;
   try { d = await api("/api/pending"); } catch (err) { $("#pending-list").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+  // le badge ne compte que ce qui demande une action : une source pas terminée ou un torrent
+  // déjà dans qBittorrent se règlent tout seuls au prochain passage de cross-seed
+  const waits = (p) => p.reason === "incomplete" || p.reason === "present";
+  const todo = d.items.filter((p) => !waits(p)), later = d.items.filter(waits);
   const cnt = $("#cnt-pending");
-  cnt.textContent = d.items.length || "";
-  cnt.classList.toggle("hot", d.items.length > 0);
+  cnt.textContent = todo.length || "";
+  cnt.classList.toggle("hot", todo.length > 0);
   if (!d.items.length) {
     $("#pending-list").innerHTML = `<p class="empty">Aucune injection en attente. Tout ce que cross-seed a trouvé est dans qBittorrent.</p>`;
     return;
   }
-  $("#pending-list").innerHTML = d.items.map((p) => {
+  $("#pending-list").innerHTML =
+    (todo.length ? `<h3 class="p-sec">À regarder <b>${todo.length}</b></h3>${todo.map(card).join("")}`
+      : `<p class="empty">Aucun échec d'injection.</p>`)
+    + (later.length ? `<h3 class="p-sec">Se règlent tout seuls <b>${later.length}</b></h3>
+        <p class="muted">Source pas encore terminée, ou torrent déjà dans qBittorrent : cross-seed s'en occupe à son prochain passage.</p>${later.map(card).join("")}` : "")
+    + (d.writable ? "" : state.readonly
+      ? `<p class="muted">Lecture seule (XSE_READONLY) : suppression désactivée.</p>`
+      : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
+  function card(p) {
     const open = state.openPending.has(p.file);
     return `<div class="card pcard${p.reason === "incomplete" ? " wait" : ""}" data-pfile="${esc(p.file)}">
       <div class="card-head">
@@ -925,9 +937,7 @@ async function loadPending() {
       ${open ? pendingDetail(p) : ""}
       ${p.errors.length ? `<pre>${esc(p.errors.join("\n"))}</pre>` : ""}
     </div>`;
-  }).join("") + (d.writable ? "" : state.readonly
-      ? `<p class="muted">Lecture seule (XSE_READONLY) : suppression désactivée.</p>`
-      : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
+  }
 }
 const pct = (x) => `${Math.floor((x || 0) * 1000) / 10} %`;
 // Pourquoi ce torrent attend : déduit de l'état de qBittorrent
