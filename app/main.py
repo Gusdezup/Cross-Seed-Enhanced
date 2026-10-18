@@ -430,9 +430,77 @@ async def pending():
             info.update(file=p.name, size=p.stat().st_size,
                         mtime=datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"))
             info["errors"] = await asyncio.to_thread(logs.errors_for, info["hash"][:8]) if info["hash"] else []
+            meta = await asyncio.to_thread(_torrent_meta, p)
+            info["total_size"] = meta.get("size")
             items.append(info)
+    await _pending_sources(items)
     writable = pdir.is_dir() and os.access(pdir, os.W_OK) and not config.READONLY
     return {"items": items, "writable": writable}
+
+
+def _bdecode(data: bytes, i: int = 0):
+    """Décodeur bencode minimal : (valeur, position suivante)."""
+    c = data[i:i + 1]
+    if c == b"i":
+        j = data.index(b"e", i)
+        return int(data[i + 1:j]), j + 1
+    if c == b"l":
+        out, i = [], i + 1
+        while data[i:i + 1] != b"e":
+            v, i = _bdecode(data, i)
+            out.append(v)
+        return out, i + 1
+    if c == b"d":
+        out, i = {}, i + 1
+        while data[i:i + 1] != b"e":
+            k, i = _bdecode(data, i)
+            out[k], i = _bdecode(data, i)
+        return out, i + 1
+    j = data.index(b":", i)
+    n = int(data[i:j])
+    return data[j + 1:j + 1 + n], j + 1 + n
+
+
+def _torrent_meta(path) -> dict:
+    """Nom et taille totale d'un .torrent en attente ({} si illisible)."""
+    try:
+        info = _bdecode(path.read_bytes())[0].get(b"info", {})
+        files = info.get(b"files")
+        size = sum(f.get(b"length", 0) for f in files) if files else info.get(b"length")
+        return {"name": info.get(b"name", b"").decode("utf-8", "replace"), "size": size}
+    except (OSError, ValueError, IndexError, AttributeError):
+        return {}
+
+
+async def _pending_sources(items: list) -> None:
+    """Pour chaque injection en attente : le torrent trouvé est-il déjà dans qBittorrent,
+    et dans quel état sont les torrents locaux de même taille (sa source probable).
+    cross-seed n'injecte pas tant que la source n'est pas terminée : il garde le .torrent
+    et retente à chaque passage du job inject."""
+    try:
+        torrents = await clients._qbit_all()
+    except Exception:  # noqa: BLE001  qBittorrent injoignable : pas de diagnostic
+        for it in items:
+            it.update(qbit=None, sources=None, reason=None)
+        return
+    by_hash = {(t.get("hash") or "").lower(): t for t in torrents}
+    view = lambda t: {"name": t.get("name"), "progress": t.get("progress") or 0,  # noqa: E731
+                      "state": t.get("state"), "category": t.get("category") or ""}
+    for it in items:
+        t = by_hash.get((it.get("hash") or "").lower())
+        it["qbit"] = view(t) if t else None
+        size = it.get("total_size")
+        srcs = [view(x) for x in torrents if size and x.get("total_size") == size
+                and (x.get("hash") or "").lower() != (it.get("hash") or "").lower()]
+        it["sources"] = srcs
+        if t:
+            it["reason"] = "present"
+        elif srcs and all(s["progress"] < 1 for s in srcs):
+            it["reason"] = "incomplete"
+        elif not srcs and size:
+            it["reason"] = "nosource"
+        else:
+            it["reason"] = "refused"
 
 
 @app.delete("/api/pending/{filename}")

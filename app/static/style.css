@@ -538,3 +538,11 @@ tr.qdetail .kv dd { font-family: var(--sans); overflow-wrap: anywhere; }
 /* File : « Retirer » et « Détail » côte à côte */
 table.queue .c-act { width: 170px; }
 table.queue td.c-act .btns { justify-content: flex-end; flex-wrap: nowrap; }
+
+/* injections en attente : raison et détail */
+.pcard.wait { border-left: 3px solid var(--accent); }
+.p-why { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.pname { user-select: text; }
+.pdetail { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: var(--raised); grid-template-columns: max-content 1fr; }
+.pdetail dt, .pdetail dd { font-family: var(--sans); overflow-wrap: anywhere; }
+@media (max-width: 700px) { .pdetail { grid-template-columns: 1fr; gap: 2px; } }

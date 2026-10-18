@@ -63,7 +63,7 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
-  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
+  settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), openPending: new Set(), indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
 };
 
 // ---------- onglets ----------
@@ -911,19 +911,56 @@ async function loadPending() {
     $("#pending-list").innerHTML = `<p class="empty">Aucune injection en attente. Tout ce que cross-seed a trouvé est dans qBittorrent.</p>`;
     return;
   }
-  $("#pending-list").innerHTML = d.items.map((p) => `<div class="card">
+  $("#pending-list").innerHTML = d.items.map((p) => {
+    const open = state.openPending.has(p.file);
+    return `<div class="card pcard${p.reason === "incomplete" ? " wait" : ""}" data-pfile="${esc(p.file)}">
       <div class="card-head">
         <div><span class="chip" style="--c:${trackerColor(p.tracker)}">${esc(p.tracker)}</span>
-          <span class="rname">${esc(p.name)}</span></div>
+          <span class="rname pname" title="Afficher le détail">${esc(p.name)}</span></div>
         <div class="btns"><span class="muted" style="margin:0">${esc(p.type)}, trouvé le ${fmtDate(p.mtime)}</span>
+          <button class="small ghost" data-pdetail>${open ? "Masquer" : "Détail"}</button>
           ${d.writable ? `<button class="small danger" data-del="${esc(p.file)}">Abandonner</button>` : ""}</div>
       </div>
+      <div class="p-why">${esc(pendingReason(p))}</div>
+      ${open ? pendingDetail(p) : ""}
       ${p.errors.length ? `<pre>${esc(p.errors.join("\n"))}</pre>` : ""}
-    </div>`).join("") + (d.writable ? "" : state.readonly
+    </div>`;
+  }).join("") + (d.writable ? "" : state.readonly
       ? `<p class="muted">Lecture seule (XSE_READONLY) : suppression désactivée.</p>`
       : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
 }
+const pct = (x) => `${Math.floor((x || 0) * 1000) / 10} %`;
+// Pourquoi ce torrent attend : déduit de l'état de qBittorrent
+function pendingReason(p) {
+  if (p.reason === "incomplete") {
+    const s = p.sources[0];
+    return `Source pas terminée dans qBittorrent (${pct(s.progress)}) : cross-seed attend la fin du téléchargement pour injecter, et retentera tout seul. Rien à faire.`;
+  }
+  if (p.reason === "present") return `Déjà dans qBittorrent (${pct(p.qbit.progress)}) : ce fichier sera retiré au prochain passage de cross-seed.`;
+  if (p.reason === "nosource") return "Aucun torrent de même taille dans qBittorrent : la source a sans doute été supprimée. Tu peux abandonner.";
+  if (p.reason === "refused") return "Source terminée, mais l'injection a échoué (voir les erreurs ci-dessous ou les logs).";
+  return "";
+}
+function pendingDetail(p) {
+  const rows = [["Fichier", `<span class="mono">${esc(p.file)}</span>`], ["Hash trouvé", `<span class="mono">${esc(p.hash || "—")}</span>`]];
+  if (p.total_size) rows.push(["Taille", fmtSize(p.total_size)]);
+  if (p.qbit) rows.push(["Dans qBittorrent", `${esc(p.qbit.name)} — ${pct(p.qbit.progress)}, ${esc(p.qbit.state)}`]);
+  if (p.sources === null) rows.push(["Source", "qBittorrent injoignable"]);
+  else rows.push(["Source probable", p.sources.length
+    ? p.sources.map((s) => `${esc(s.name)} — ${pct(s.progress)}, ${esc(s.state)}${s.category ? `, catégorie ${esc(s.category)}` : ""}`).join("<br>")
+    : "aucun torrent de même taille"]);
+  return `<dl class="kv pdetail">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
 $("#pending-list").addEventListener("click", async (e) => {
+  const t = e.target.closest(".pname, [data-pdetail]");
+  if (t) {
+    const sel = window.getSelection();
+    if (t.matches(".pname") && sel && !sel.isCollapsed) return;
+    const f = t.closest("[data-pfile]").dataset.pfile;
+    state.openPending.has(f) ? state.openPending.delete(f) : state.openPending.add(f);
+    loadPending();
+    return;
+  }
   const b = e.target.closest("[data-del]");
   if (!b || !confirm(`Abandonner cette injection ?\n\n${b.dataset.del}\n\nSeul le fichier .torrent en attente est supprimé ; tes données ne sont pas touchées.`)) return;
   try {
