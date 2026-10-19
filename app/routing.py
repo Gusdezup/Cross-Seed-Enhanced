@@ -228,6 +228,25 @@ SIZE_TOLERANCE = 0.10
 MAX_PER_INDEXER = 10
 
 
+SAME_SIZE = 0.001   # même release : même taille, aux arrondis près
+
+
+def same_size(a: int, b: int) -> bool:
+    return bool(a and b) and abs(a - b) <= b * SAME_SIZE
+
+
+def local_name(name: str) -> str:
+    """Nom de la release locale sans l'extension du fichier."""
+    for ext in _EXTS:
+        if name.lower().endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def norm(title: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", title.lower())
+
+
 def plausible(cands: list, size: int) -> list:
     if size:
         cands = [c for c in cands if not c["size"] or abs(c["size"] - size) <= size * SIZE_TOLERANCE]
@@ -304,8 +323,17 @@ async def search(item: dict, keys: list) -> dict:
         res["candidates"] += len(cands)
         for c in cands:
             tracker = c["tracker"] or name
+            sent_as = c["title"]
             try:
-                status = await clients.xs_announce(c["title"], c["link"], tracker)
+                status = await clients.xs_announce(sent_as, c["link"], tracker)
+                # titre traduit (« Avatar.La.Voie.de.l.Eau » pour « Avatar.The.Way.Of.Water ») : en announce,
+                # cross-seed cherche la release locale par son titre et abandonne sans comparer les
+                # fichiers. Si la taille est la même, c'est sans doute la même release : on la renvoie
+                # sous le nom local, cross-seed retrouve la source et compare les fichiers comme d'habitude.
+                local = local_name(item["name"])
+                if status == 204 and same_size(c["size"], item.get("size") or 0) and norm(sent_as) != norm(local):
+                    sent_as = local
+                    status = await clients.xs_announce(sent_as, c["link"], tracker)
             except httpx.TransportError:
                 raise   # cross-seed injoignable : la file remettra la recherche en attente
             except Exception as e:  # noqa: BLE001
@@ -313,10 +341,10 @@ async def search(item: dict, keys: list) -> dict:
                 continue
             # titre, taille et réponse de cross-seed de chaque release proposée (détail de la file)
             res["examined"].append({"title": c["title"], "size": c["size"], "tracker": tracker,
-                                    "status": status})
+                                    "status": status, "renamed": sent_as != c["title"]})
             if status in (200, 202):
                 res["found"] += 1
-                sent.append((c["title"], tracker, status))
+                sent.append((sent_as, tracker, status))   # les logs de cross-seed citent le nom envoyé
     if sent:
         save = (xsdb.useful_settings().get("action") or {}).get("value", "").strip("\"'`") == "save"
         # cross-seed écrit sa ligne une fois l'injection faite, parfois plusieurs secondes après

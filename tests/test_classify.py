@@ -19,3 +19,12 @@ def test_titre_avec_extension_reconnu():
 
 def test_titre_plus_court_pas_confondu():
     assert _c("Black.Clover.S02E01.VOSTFR.1080p.WEBRiP.x265") == "matched"
+
+
+def test_renvoi_sous_le_nom_local():
+    from app.routing import local_name, norm, same_size
+    assert local_name("Avatar.The.Way.Of.Water.2022.MULTi.VFF.1080p.mHD.x264.AC3.5.1-XSHD.mkv").endswith("-XSHD")
+    assert norm("Avatar.La.Voie.de.l.Eau.2022") != norm("Avatar.The.Way.Of.Water.2022")
+    assert same_size(9_000_000_000, 9_004_000_000)
+    assert not same_size(9_000_000_000, 9_300_000_000)
+    assert not same_size(0, 9_000_000_000)

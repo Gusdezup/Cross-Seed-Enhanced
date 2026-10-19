@@ -485,7 +485,7 @@ function queueDetail(i) {
     const XS_ANSWER = { 200: "correspond", 202: "correspond, source incomplète", 204: "ne correspond pas" };
     rows.push(["Releases examinées", (r.examined || []).length
       ? `<ul class="examined">${r.examined.map((c) => `<li><span class="mono">${esc(c.title)}</span>
-          <span class="muted">${c.size ? fmtSize(c.size) + " · " : ""}${esc(c.tracker)} · ${esc(XS_ANSWER[c.status] || `HTTP ${c.status}`)}</span></li>`).join("")}</ul>`
+          <span class="muted">${c.size ? fmtSize(c.size) + " · " : ""}${esc(c.tracker)} · ${esc(XS_ANSWER[c.status] || `HTTP ${c.status}`)}${c.renamed ? " · renvoyée sous le nom local (titre différent, même taille)" : ""}</span></li>`).join("")}</ul>`
       : String(r.candidates ?? 0)]);
     rows.push(["Injectés", list(r.injected)]);
     if ((r.matched || []).length) rows.push(["Trouvés, non confirmés", list(r.matched)]);
