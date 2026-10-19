@@ -440,7 +440,7 @@ function routedResultHtml(r) {
   if ((r.matched || []).length) parts.push(`<span class="res-warn" title="cross-seed a répondu « correspondance trouvée », mais ses logs ne disent pas s'il l'a injectée ou s'il l'avait déjà">trouvé, non confirmé :</span> ${chips(r.matched)}`);
   if (r.exists.length) parts.push(`<span class="res-none">déjà en seed :</span> ${chips(r.exists)}`);
   if (!parts.length && !r.routed.length && seededOrPaused(r)) parts.push(`<span class="res-none">${(r.paused || []).length ? "Non cherchée : indexers en pause ou déjà en seed" : "Rien à chercher : déjà en seed sur tous les indexers routés"}</span>`);
-  if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} résultat${r.candidates > 1 ? "s" : ""} examiné${r.candidates > 1 ? "s" : ""}, aucun ne correspond` : "Rien trouvé"}</span>`);
+  if (!parts.length) parts.push(`<span class="res-none">${r.candidates ? `${r.candidates} release${r.candidates > 1 ? "s" : ""} examinée${r.candidates > 1 ? "s" : ""}, aucune ne correspond` : "Rien trouvé"}</span>`);
   const paused = r.paused || [];
   const asked = r.routed.length;
   const seeded = r.seeded || [];
@@ -482,7 +482,11 @@ function queueDetail(i) {
     if ((r.seeded || []).length) rows.push(["Non interrogés : déjà en seed", list(r.seeded)]);
     if ((r.paused || []).length) rows.push(["Non interrogés : en pause", list(r.paused)]);
     if ((r.disabled || []).length) rows.push(["Non interrogés : désactivés dans cross-seed", list(r.disabled)]);
-    rows.push(["Résultats examinés", String(r.candidates ?? 0)]);
+    const XS_ANSWER = { 200: "correspond", 202: "correspond, source incomplète", 204: "ne correspond pas" };
+    rows.push(["Releases examinées", (r.examined || []).length
+      ? `<ul class="examined">${r.examined.map((c) => `<li><span class="mono">${esc(c.title)}</span>
+          <span class="muted">${c.size ? fmtSize(c.size) + " · " : ""}${esc(c.tracker)} · ${esc(XS_ANSWER[c.status] || `HTTP ${c.status}`)}</span></li>`).join("")}</ul>`
+      : String(r.candidates ?? 0)]);
     rows.push(["Injectés", list(r.injected)]);
     if ((r.matched || []).length) rows.push(["Trouvés, non confirmés", list(r.matched)]);
     if ((r.exists || []).length) rows.push(["Déjà présents", list(r.exists)]);

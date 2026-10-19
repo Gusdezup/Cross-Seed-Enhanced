@@ -281,7 +281,7 @@ async def search(item: dict, keys: list) -> dict:
                       if k not in paused and k not in disabled and k not in set(item.get("skip") or [])],
            "seeded": [names.get(k, k) for k in keys if k in set(item.get("skip") or []) and k not in paused],
            "paused": [f"{names.get(k, k)} (jusqu'à {datetime.fromtimestamp(v).strftime('%H:%M')})" for k, v in paused.items()],
-           "candidates": 0, "errors": [], "searched": []}
+           "candidates": 0, "errors": [], "searched": [], "examined": []}
     params = queries(item["name"])
     offset, ident = logs.position("info")
     sent = []
@@ -311,6 +311,9 @@ async def search(item: dict, keys: list) -> dict:
             except Exception as e:  # noqa: BLE001
                 res["errors"].append(f"{tracker} : {str(e)[:150]}")
                 continue
+            # titre, taille et réponse de cross-seed de chaque release proposée (détail de la file)
+            res["examined"].append({"title": c["title"], "size": c["size"], "tracker": tracker,
+                                    "status": status})
             if status in (200, 202):
                 res["found"] += 1
                 sent.append((c["title"], tracker, status))

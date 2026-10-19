@@ -554,3 +554,7 @@ table.queue td.c-act .btns { justify-content: flex-end; flex-wrap: nowrap; }
 #q-filter b { font-weight: 500; font-size: 12px; margin-left: 2px; }
 #q-filter button.on b { color: var(--accent); }
 @media (max-width: 700px) { #q-filter { display: flex; } #q-filter button { flex: 1 1 auto; } }
+.examined { margin: 0; padding-left: 16px; }
+.examined li { margin: 2px 0; }
+.examined .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.examined .muted { margin-left: 6px; font-size: 12px; }
