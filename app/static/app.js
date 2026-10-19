@@ -984,7 +984,7 @@ async function loadPending() {
       </div>
       <div class="p-why">${esc(pendingReason(p))}</div>
       ${open ? pendingDetail(p) : ""}
-      ${p.errors.length ? `<pre>${esc(p.errors.join("\n"))}</pre>` : ""}
+      ${p.errors.length && (open || !waits(p)) ? `<pre class="${waits(p) ? "p-log" : ""}">${esc(p.errors.join("\n"))}</pre>` : ""}
     </div>`;
   }
 }

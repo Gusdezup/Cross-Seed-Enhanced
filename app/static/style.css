@@ -558,3 +558,5 @@ table.queue td.c-act .btns { justify-content: flex-end; flex-wrap: nowrap; }
 .examined li { margin: 2px 0; }
 .examined .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .examined .muted { margin-left: 6px; font-size: 12px; }
+/* erreurs d'une injection qui se règle toute seule : attendues, montrées en gris dans le détail */
+.card pre.p-log { color: var(--muted); }
