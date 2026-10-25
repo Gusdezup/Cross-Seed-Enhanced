@@ -1,6 +1,6 @@
 # cross-seed enhanced
 
-Interface web pour piloter [cross-seed](https://www.cross-seed.org) v6 ou v7 avec qBittorrent : rechercher un torrent précis, faire passer certaines releases en priorité et gérer les injections en échec. La gestion des indexers est compatible avec les deux versions.
+Interface web pour piloter [cross-seed](https://www.cross-seed.org) v6 ou v7 avec un ou plusieurs clients torrent (qBittorrent, rTorrent, Transmission, Deluge) : rechercher un torrent précis, faire passer certaines releases en priorité et gérer les injections en échec. La gestion des indexers est compatible avec les deux versions.
 
 L'outil ne remplace pas cross-seed. Il utilise son API, lit ses logs et sa base en lecture seule. En v6 seulement, il peut modifier `config.js` à la demande, avec sauvegarde préalable.
 
@@ -17,9 +17,9 @@ L'interface tient en trois pages.
 
 « Cherche-moi des releases à envoyer vers tels trackers », sur une seule page :
 
-- **Quelles releases** : toutes, un ou plusieurs groupes de trackers, des catégories qBittorrent (ou « sans catégorie »). un champ « mot clé » (HDForever, Remux, 1080p…) toujours visible ; « Affiner » ajoute des filtres : présente sur tel tracker, état (cross-seed trouvé mais pas injecté, sans torrent d'origine, plusieurs copies sur un même tracker), nombre de trackers où la release est déjà en seed, « jamais cherchée sur la cible » ou « pas cherchée depuis N jours », plafond.
+- **Quelles releases** : toutes, un ou plusieurs groupes de trackers, des catégories des clients torrent (ou « sans catégorie »). un champ « mot clé » (HDForever, Remux, 1080p…) toujours visible ; « Affiner » ajoute des filtres : présente sur tel tracker, dans tel client (avec plusieurs clients), état (cross-seed trouvé mais pas injecté, sans torrent d'origine, plusieurs copies sur un même tracker), nombre de trackers où la release est déjà en seed, « jamais cherchée sur la cible » ou « pas cherchée depuis N jours », plafond.
 - **Vers quels trackers** : « Selon le groupe » (chaque release part vers les trackers de son groupe : un film vers les trackers vidéo, un album vers les trackers musique) ou « Choisir les trackers » (cochés à la main, pour toutes les releases choisies).
-- **La liste des releases concernées**, mise à jour en direct : tes torrents qBittorrent regroupés par release (copies cross-seedées et hardlinks renommés fusionnés), avec une puce par tracker : ✓ déjà en seed, + trouvée par cross-seed mais pas encore injectée, – cherchée sans résultat. Tri, colonnes masquables, détail d'une release au clic (état, dernière recherche et copie dans qBittorrent, tracker par tracker), bouton « Chercher » pour une seule release. Cocher des releases limite la recherche à celles-ci. Sur téléphone, une carte par release.
+- **La liste des releases concernées**, mise à jour en direct : les torrents de tous tes clients regroupés par release (copies cross-seedées et hardlinks renommés fusionnés), avec une puce par tracker : ✓ déjà en seed, + trouvée par cross-seed mais pas encore injectée, – cherchée sans résultat. Tri, colonnes masquables, détail d'une release au clic (état, dernière recherche et copie dans le client, tracker par tracker), bouton « Chercher » pour une seule release. Avec plusieurs clients, un badge indique le ou les clients de chaque release. Cocher des releases limite la recherche à celles-ci. Sur téléphone, une carte par release.
 - **Quand** : « Maintenant » ou « Régulièrement » (toutes les N heures, avec un nom et, au choix, un premier passage tout de suite).
 - **La barre de lancement**, toujours visible en bas : nombre de recherches, durée estimée, releases écartées (déjà en seed sur la cible, déjà cherchées…), et le bouton « Lancer » ou « Programmer ».
 
@@ -30,21 +30,22 @@ Les choix sont mémorisés dans le navigateur. Une release déjà en seed sur to
 ### 2. Suivre l'avancement
 
 - **Recherches** : une recherche toutes les N secondes. Chaque lancement forme une **demande** affichée en carte : avancement, injections obtenues, fin estimée, détail et bouton « Annuler ». Ordre de passage : recherches d'une seule release, puis demandes lancées à la main, puis recherches programmées. Le résultat de chaque recherche est lu dans les logs ou dans la réponse de cross-seed : injectée sur tel tracker, rien trouvé, sautée et pourquoi. La file survit aux redémarrages. Boutons pour lancer le scan RSS ou le scan complet de cross-seed.
-- **Injections en attente** : les torrents trouvés mais refusés par qBittorrent, avec l'erreur correspondante, un bouton pour retenter tout de suite et un pour abandonner.
+- **Injections en attente** : les torrents trouvés mais pas encore injectés, avec l'erreur correspondante et l'état de leur source probable (cherchée dans tous les clients), un bouton pour retenter tout de suite et un pour abandonner.
 - **Logs** : en direct, avec une couleur par tracker, un filtre texte et un filtre « injections réussies ».
 
 ### 3. Réglages
 
 - **Groupes de trackers** : chacun organise les siens selon sa stack, par exemple « Vidéo » (catégories `radarr`, `sonarr` et les trackers films et séries) et « Musique » (`lidarr` et les trackers musique). Un groupe peut aussi recevoir « toutes les autres catégories ». Pour un groupe, l'interface interroge elle-même ses trackers avec les URL Torznab de `config.js`, puis soumet les résultats de taille proche à cross-seed par `/api/announce` ; cross-seed vérifie et injecte comme d'habitude. Une catégorie rangée dans aucun groupe reste cherchée par cross-seed sur tous ses indexers. Le scan complet de cross-seed (sauf s'il est remplacé, voir ci-dessous), son RSS et son announce ne sont pas concernés. Les anciens « routages par catégorie » sont convertis automatiquement en groupes.
-- **Passer en premier** (groupe de release, mots contenus, début du nom, catégorie qBittorrent) : releases servies avant les autres dans toute recherche, lancée ou programmée. Exemple : groupe de release HDForever.
+- **Passer en premier** (groupe de release, mots contenus, début du nom, catégorie) : releases servies avant les autres dans toute recherche, lancée ou programmée. Exemple : groupe de release HDForever.
 - **Scan complet de cross-seed** : une case met `searchCadence: null` dans `config.js` (avec sauvegarde) pour le couper, par exemple quand une recherche programmée le remplace ; décocher rétablit l'ancienne valeur.
 - **Indexers** : état de chaque indexer, pause en cours, Suspendre/Réactiver (ligne commentée dans `config.js`). Avec Prowlarr ou Jackett, ajout et retrait d'indexers sans éditer `config.js`, avec avertissement si un indexer est désactivé ou en échec, ou si le même site est déclaré deux fois.
+- **Clients torrent** : état et version de chacun, nom affiché.
 - Rythme de la file, noms des trackers, sources Prowlarr et Jackett, et les principaux réglages de cross-seed (`searchLimit`, `excludeRecentSearch`, cadences…), vérifiés avec les mêmes règles que cross-seed 6.13 avant écriture, avec un bouton pour redémarrer cross-seed.
 
 ## Prérequis
 
 - cross-seed **v6** (testé avec 6.13.7) ou **v7** (testé avec 7.0.0-22) en mode daemon, avec son API (`apiKey`, ou la clé affichée par `cross-seed api-key`)
-- qBittorrent **5.2 ou plus récent**, avec une clé API WebUI (Options, WebUI)
+- Un ou plusieurs clients torrent parmi ceux de cross-seed : qBittorrent (clé API WebUI à partir de la 5.2, sinon identifiants), rTorrent, Transmission, Deluge. Seul qBittorrent a été testé sur une vraie installation : les autres le sont sur des réponses simulées, les retours sont bienvenus.
 - Docker et Docker Compose
 
 ## Installation
@@ -58,7 +59,29 @@ mkdir -p data
 docker compose up -d
 ```
 
-Dans `.env`, renseigne les adresses et clés API de qBittorrent et cross-seed, ainsi que `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
+Dans `.env`, renseigne l'adresse et la clé API de cross-seed, tes clients torrent (voir ci-dessous) et `XS_CONFIG_PATH`, le dossier de config de cross-seed sur l'hôte (celui monté sur `/config` dans son conteneur). L'interface est ensuite sur `http://<hôte>:2469`.
+
+### Clients torrent
+
+cross-seed enhanced lit les torrents de **tous** tes clients, comme cross-seed, et ne leur envoie aucune action (cross-seed s'occupe des injections). Les clients sont pris, dans cet ordre :
+
+1. **`TORRENT_CLIENT_1`, `TORRENT_CLIENT_2`…** du `.env`, avec la syntaxe de `torrentClients` de cross-seed :
+
+   ```env
+   TORRENT_CLIENT_1=qbittorrent:http://192.168.1.20:8081
+   TORRENT_CLIENT_1_APIKEY=…          # qBittorrent ≥ 5.2 ; sinon identifiants dans l'URL
+   TORRENT_CLIENT_1_NAME=principal    # facultatif
+   TORRENT_CLIENT_2=qbittorrent:http://admin:motdepasse@192.168.1.20:8082
+   TORRENT_CLIENT_3=rtorrent:http://user:pass@192.168.1.30/RPC2
+   TORRENT_CLIENT_4=transmission:http://user:pass@192.168.1.30:9091/transmission/rpc
+   TORRENT_CLIENT_5=deluge:http://:pass@192.168.1.30:8112/json
+   ```
+
+   Les numéros sont triés et peuvent avoir des trous. Un caractère spécial dans un identifiant s'encode comme dans une URL (`@` → `%40`). `readonly:` est accepté et sans effet. rTorrent accepte aussi le httprpc de ruTorrent (`…/rutorrent/plugins/httprpc/action.php`) et SCGI (`rtorrent:scgi://hôte:5000`, ou `rtorrent:scgi:///chemin/.rtorrent.sock` avec le socket monté dans le conteneur).
+2. Sinon, **`torrentClients` de cross-seed** (`config.js` en v6, ses réglages en v7) : rien à configurer, mêmes clients et même ordre que cross-seed. Le qBittorrent du port de `QBT_URL` reprend l'adresse et la clé API de `QBT_URL` ; `localhost` (cross-seed dans le réseau de Gluetun, par exemple) est remplacé par `TORRENT_CLIENT_HOST`, à défaut par l'hôte de `QBT_URL`.
+3. Sinon, **`QBT_URL` et `QBT_APIKEY`** (un seul qBittorrent, l'ancien format, toujours valable).
+
+Une même release présente dans plusieurs clients n'apparaît qu'une fois. Un client injoignable est signalé (pastille rouge, liste marquée incomplète) et ses torrents manquent jusqu'à son retour. Catégorie lue selon le client : catégorie qBittorrent, étiquette ruTorrent, premier label Transmission (≥ 4.0), plugin Label de Deluge. Le nom de chaque client se change dans **Réglages › Clients torrent** (`TORRENT_CLIENT_N_NAME` reste prioritaire).
 
 ### cross-seed v7 (expérimental)
 
