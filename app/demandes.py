@@ -2,12 +2,13 @@
 
 Critères (tous facultatifs, combinés) :
   groups      noms de groupes de trackers : releases dont la catégorie relève de ces groupes
-  categories  catégories qBittorrent ("" = sans catégorie) ; groupes et catégories s'additionnent
+  categories  catégories des clients torrent ("" = sans catégorie) ; groupes et catégories s'additionnent
   keys        releases cochées à la main dans la liste : remplacent tous les autres critères
   text        mots présents dans le nom (tous)
   state       "available" (cross-seed trouvé, pas injecté), "noorig" (sans torrent d'origine),
               "dup" (plusieurs copies sur un même tracker)
-  on_tracker  nom d'un tracker où la release est présente dans qBittorrent
+  on_tracker  nom d'un tracker où la release est présente dans les clients torrent
+  client      nom d'un client torrent où la release est présente
   rule        étiquette d'une règle prioritaire
   max_seeds   en seed sur au plus N trackers
   fresh       {"mode": "all" | "never" | "days", "days": N} : sur au moins un tracker cible, jamais
@@ -50,6 +51,7 @@ def normalize(body: dict) -> dict:
         "rule": str(body.get("rule") or "").strip(),
         "state": body.get("state") if body.get("state") in STATES else "",
         "on_tracker": str(body.get("on_tracker") or "").strip(),
+        "client": str(body.get("client") or "").strip(),
         "max_seeds": None if body.get("max_seeds") in (None, "") else num(body.get("max_seeds"), 0, 999, None),
         "fresh": {"mode": mode, "days": num(fresh.get("days"), 1, 3650, 30)},
         "targets": list(dict.fromkeys(k for k in _strs(body.get("targets")) if k)),
@@ -84,6 +86,8 @@ def _passes(r: dict, crit: dict, terms: list) -> bool:
             or (st == "dup" and len({c["tracker"] for c in r["copies"]}) == len(r["copies"])):
         return False
     if crit["on_tracker"] and not any(c["tracker"] == crit["on_tracker"] for c in r["copies"]):
+        return False
+    if crit.get("client") and crit["client"].lower() not in {n.lower() for n in r.get("clients") or []}:
         return False
     return True
 
@@ -164,6 +168,8 @@ def label(crit: dict, active: dict) -> tuple:
                       "dup": "copies en double"}[crit["state"]])
     if crit["on_tracker"]:
         extra.append(f"présentes sur {crit['on_tracker']}")
+    if crit.get("client"):
+        extra.append(f"dans {crit['client']}")
     if crit["max_seeds"] is not None:
         extra.append(f"≤ {crit['max_seeds']} tracker{'s' if crit['max_seeds'] > 1 else ''}")
     if crit["fresh"]["mode"] == "never":

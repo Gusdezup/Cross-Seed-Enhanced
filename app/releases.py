@@ -1,4 +1,4 @@
-"""Regroupe les torrents qBittorrent en releases (copies cross-seedées et hardlinks renommés)."""
+"""Regroupe les torrents des clients torrent en releases (copies cross-seedées et hardlinks renommés)."""
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -108,6 +108,8 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
                 "state": t.get("state") or "",
                 "path": t.get("content_path") or "",
                 "added_on": t.get("added_on") or 0,
+                "client": t.get("client") or "",
+                "clients": t.get("clients") or [],
             })
         copies.sort(key=lambda c: (c["cross_seed"], c["added_on"]))
         category = release_category(orig, ts)
@@ -125,6 +127,8 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
             "rules": matched,
             "added_on": min(c["added_on"] for c in copies),
             "category": category,
+            # clients torrent où la release est présente (une copie peut être dans plusieurs)
+            "clients": list(dict.fromkeys(n for c in copies for n in c["clients"])),
             "last_search": None,
             "trackers": [],
             "seeds": len({c["tracker"] for c in copies}),

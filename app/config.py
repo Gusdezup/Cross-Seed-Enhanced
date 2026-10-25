@@ -5,9 +5,12 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
+# Client torrent unique, format historique (qBittorrent seul). Voir aussi TORRENT_CLIENT_N plus bas.
 QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
 QBT_APIKEY = os.environ.get("QBT_APIKEY", "")
+QBT_URL_SET = bool(os.environ.get("QBT_URL", "").strip())
 XS_URL = os.environ.get("XS_URL", "http://cross-seed:2468").rstrip("/")
 XS_APIKEY = os.environ.get("XS_APIKEY", "")
 XS_VERSION = os.environ.get("XS_VERSION", "").strip()   # vide : détection automatique (plus bas)
@@ -37,6 +40,80 @@ class ReadOnlyError(RuntimeError):
 def guard(action: str, *, config_write: bool = False) -> None:
     if READONLY and not (config_write and ALLOW_CONFIG_WRITE):
         raise ReadOnlyError(f"Lecture seule (XSE_READONLY) : {action} désactivé")
+
+# --- clients torrent ------------------------------------------------------------
+# Même syntaxe que torrentClients de cross-seed : "type[:readonly]:url", identifiants dans l'URL.
+CLIENT_TYPES = {"qbittorrent": "qBittorrent", "rtorrent": "rTorrent",
+                "transmission": "Transmission", "deluge": "Deluge"}
+_CLIENT_RE = re.compile(r"^\s*([a-z]+):(readonly:)?(\S+)\s*$", re.I)
+
+
+def parse_client(entry: str) -> dict:
+    """Décompose une entrée torrentClients. Lève ValueError si elle n'est pas reconnue.
+    "readonly:" est accepté et sans effet : XSE ne fait que lire les clients."""
+    m = _CLIENT_RE.match(str(entry or ""))
+    kind = m.group(1).lower() if m else ""
+    if kind not in CLIENT_TYPES:
+        raise ValueError(f"Client torrent non reconnu : {_hide_password(str(entry))} "
+                         f"(attendu : {'|'.join(CLIENT_TYPES)}:http://hôte:port)")
+    p = urlsplit(m.group(3))
+    if p.scheme not in ("http", "https", "scgi") or (p.scheme == "scgi" and kind != "rtorrent"):
+        raise ValueError(f"Adresse de client invalide : {_hide_password(m.group(3))}")
+    if p.scheme != "scgi" and not p.hostname:
+        raise ValueError(f"Adresse de client sans hôte : {_hide_password(m.group(3))}")
+    try:
+        port = p.port
+    except ValueError as e:
+        raise ValueError(f"Port invalide : {_hide_password(m.group(3))}") from e
+    host = p.hostname or ""
+    return {"type": kind, "scheme": p.scheme, "host": host, "port": port,
+            "path": p.path.rstrip("/") if p.scheme != "scgi" else p.path,
+            "user": unquote(p.username or ""), "password": unquote(p.password or ""),
+            "apikey": "", "name": ""}
+
+
+def _hide_password(url: str) -> str:
+    return re.sub(r"(//[^:/@\s]*:)[^@/\s]*@", r"\1•••@", url)
+
+
+def client_url(c: dict) -> str:
+    """URL du client sans identifiants (requêtes et affichage)."""
+    if c["scheme"] == "scgi" and not c["host"]:
+        return f"scgi://{c['path']}"
+    host = f"[{c['host']}]" if ":" in c["host"] else c["host"]
+    port = f":{c['port']}" if c["port"] else ""
+    return f"{c['scheme']}://{host}{port}{c['path']}"
+
+
+def client_id(c: dict) -> str:
+    """Identifiant stable d'un client (noms personnalisés dans les réglages)."""
+    return f"{c['type']}:{client_url(c).split('://', 1)[1]}"
+
+
+def _env_clients() -> list:
+    """TORRENT_CLIENT_1, TORRENT_CLIENT_2… (numéros triés, trous permis), avec _APIKEY et _NAME."""
+    nums = sorted(int(m.group(1)) for k in os.environ if (m := re.fullmatch(r"TORRENT_CLIENT_(\d+)", k))
+                  and os.environ[k].strip())
+    out = []
+    for n in nums:
+        c = parse_client(os.environ[f"TORRENT_CLIENT_{n}"])
+        c["apikey"] = os.environ.get(f"TORRENT_CLIENT_{n}_APIKEY", "").strip()
+        c["name"] = os.environ.get(f"TORRENT_CLIENT_{n}_NAME", "").strip()[:40]
+        out.append(c)
+    return out
+
+
+ENV_CLIENTS = _env_clients()   # erreur de syntaxe : l'app ne démarre pas (comme XS_VERSION)
+# Hôte qui remplace localhost dans les adresses lues dans la config de cross-seed (cross-seed dans
+# le réseau de Gluetun, par exemple). Vide : l'hôte de QBT_URL s'il est renseigné.
+CLIENT_HOST = os.environ.get("TORRENT_CLIENT_HOST", "").strip()
+
+
+def legacy_client() -> dict:
+    c = parse_client(f"qbittorrent:{QBT_URL}")
+    c["apikey"] = QBT_APIKEY
+    return c
+
 
 LOGS_DIR = XS_CONFIG_DIR / "logs"
 PENDING_DIR = XS_CONFIG_DIR / "cross-seeds"
@@ -79,6 +156,8 @@ DEFAULT_SETTINGS = {
     "scan": {"enabled": False, "every_hours": 24, "limit": 400, "recent_days": 7},
     # Sources d'indexers saisies dans l'interface (le .env reste prioritaire)
     "sources": {"prowlarr": {"url": "", "apikey": ""}, "jackett": {"url": "", "apikey": ""}},
+    # Noms affichés des clients torrent : {identifiant du client: nom} (le .env reste prioritaire)
+    "client_names": {},
 }
 SOURCES = ("prowlarr", "jackett")
 
@@ -270,6 +349,9 @@ def save_settings(data: dict) -> dict:
         clean["groups"] = clean_groups(data["groups"])
     if "scan" in data:
         clean["scan"] = clean_scan({**clean["scan"], **(data["scan"] if isinstance(data["scan"], dict) else {})})
+    if isinstance(data.get("client_names"), dict):
+        clean["client_names"] = {str(k): str(v).strip()[:40]
+                                 for k, v in data["client_names"].items() if str(v).strip()}
     if "tracker_aliases" in data:
         clean["tracker_aliases"] = {str(k): str(v).strip()
                                     for k, v in data["tracker_aliases"].items() if str(v).strip()}

@@ -63,8 +63,14 @@ function trackerColor(name) {
 // ---------- état ----------
 const state = {
   releases: [], trackers: {}, torrents: 0, selected: new Set(), expanded: null, limit: 200,
+  clients: [], relClients: [],   // clients torrent : état (en-tête, réglages) et lecture de la liste
   settings: null, queue: null, tab: "search", sub: "queue", openItems: new Set(), openPending: new Set(), qFilter: "all", indexers: [], openBatches: new Set(), seenBatches: new Set(), batchItems: {},
 };
+
+// Plusieurs clients torrent : on affiche le client de chaque release (badge, détail, filtre)
+const multiClients = () => Math.max(state.relClients.length, state.clients.length) > 1;
+const clientsOf = (t) => (t && t.clients && t.clients.length ? t.clients : t && t.client ? [t.client] : []);
+const inClient = (t) => (multiClients() && clientsOf(t).length ? ` dans ${clientsOf(t).join(", ")}` : "");
 
 // ---------- onglets ----------
 // Trois pages : 1 Chercher, 2 Suivre l'avancement (recherches, injections en attente, logs), 3 Réglages.
@@ -131,10 +137,18 @@ async function loadHealth() {
     rb.hidden = !state.readonly;
     if (state.readonly) rb.textContent = "Lecture seule (XSE_READONLY) : aucune action sur cross-seed (jobs, recherches, redémarrage), la file de recherche ne part pas. "
       + (cfgWrite ? "Modifications de config.js autorisées (XSE_ALLOW_CONFIG_WRITE)." : "config.js n'est pas modifiable.");
-    const q = $("#pill-qbit"), x = $("#pill-xs");
-    q.className = `pill ${s.qbit.ok ? "ok" : "ko"}`;
-    q.lastChild.textContent = s.qbit.ok ? `qBittorrent ${s.qbit.version}` : "qBittorrent injoignable";
-    q.title = s.qbit.error || "";
+    const x = $("#pill-xs");
+    // une pastille par client torrent ; avec un seul client, le nom du logiciel
+    const cl = s.clients || [];
+    state.clients = cl;
+    $("#pills-clients").innerHTML = cl.length ? cl.map((c) => {
+      const label = cl.length > 1 ? c.name : c.type_label;
+      const tip = `${c.name} (${c.type_label}) — ${c.url}${c.ok ? "" : ` : ${c.error}`}`;
+      return `<span class="pill ${c.ok ? "ok" : "ko"}" title="${esc(tip)}"><i></i>${esc(c.ok ? `${label} ${c.version}` : `${label} injoignable`)}</span>`;
+    }).join("") : `<span class="pill ko"><i></i>Aucun client torrent</span>`;
+    state.clientsOrigin = s.clients_origin || "";
+    state.clientsIgnored = s.clients_ignored || [];
+    if (state.tab === "settings") renderClients();
     if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
       x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
       x.lastChild.textContent = s.xs.ok ? `cross-seed v${state.xsVersion} en ligne` : `cross-seed v${state.xsVersion} injoignable`;
@@ -197,13 +211,14 @@ function applyRelColumns() {
   }
 }
 async function loadReleases(refresh = false) {
-  $("#rel-summary").textContent = "Chargement depuis qBittorrent…";
+  $("#rel-summary").textContent = "Chargement depuis les clients torrent…";
   try {
     const d = await api(`/api/releases${refresh ? "?refresh=1" : ""}`);
     state.releases = d.releases;
     state.trackers = d.trackers;
     state.torrents = d.torrents;
     state.indexers = d.indexers || [];
+    state.relClients = d.clients || [];
     state.trackerLabels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
     for (const k of [...state.selected]) if (!state.releases.some((r) => r.key === k)) state.selected.delete(k);
     $("#cnt-releases").textContent = d.releases.length;
@@ -211,7 +226,7 @@ async function loadReleases(refresh = false) {
     renderSearch();
   } catch (err) {
     $("#rel-summary").textContent = err.message;
-    $("#rel-body").innerHTML = `<tr><td colspan="99" class="empty">${esc(err.message)}. Vérifie QBT_URL et QBT_APIKEY.</td></tr>`;
+    $("#rel-body").innerHTML = `<tr><td colspan="99" class="empty">${esc(err.message)}. Vérifie les clients torrent (TORRENT_CLIENT_N, torrentClients de cross-seed ou QBT_URL).</td></tr>`;
   }
 }
 
@@ -229,6 +244,7 @@ function matchesSearch(r) {
   if (search.state === "noorig" && r.has_original) return false;
   if (search.state === "dup" && new Set(r.copies.map((c) => c.tracker)).size === r.copies.length) return false;
   if (search.onTracker && !r.copies.some((c) => c.tracker === search.onTracker)) return false;
+  if (search.client && !(r.clients || []).some((n) => lc(n) === lc(search.client))) return false;
   return true;
 }
 function filteredReleases() {
@@ -278,18 +294,24 @@ function chipsHtml(r) {
 function renderReleases() {
   const list = filteredReleases();
   const shown = list.slice(0, state.limit);
-  $("#rel-summary").textContent = `${list.length} sur ${state.releases.length} releases ` +
-    `(${state.torrents} torrents terminés)`;
+  const down = state.relClients.filter((c) => !c.ok);
+  const sum = $("#rel-summary");
+  sum.textContent = `${list.length} sur ${state.releases.length} releases (${state.torrents} torrents terminés)` +
+    (state.relClients.length > 1 ? ` · ${state.relClients.map((c) => c.ok ? `${c.name} : ${c.torrents}` : `${c.name} : injoignable`).join(", ")}` : "") +
+    (down.length ? ` — liste incomplète, torrents de ${down.map((c) => c.name).join(", ")} absents` : "");
+  sum.classList.toggle("ko-text", down.length > 0);
+  sum.title = down.map((c) => `${c.name} : ${c.error}`).join("\n");
   const body = $("#rel-body");
   if (!shown.length) {
     body.innerHTML = `<tr><td colspan="99" class="empty">Aucune release ne correspond à ces critères.</td></tr>`;
   } else {
     body.innerHTML = shown.map((r) => {
       const flag = r.mode === "path"
-        ? `<span class="rflag" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">· sans torrent d'origine</span>` : "";
+        ? `<span class="rflag" title="Aucun torrent d'origine dans les clients torrent : toutes les copies sont des cross-seeds">· sans torrent d'origine</span>` : "";
+      const cb = multiClients() ? (r.clients || []).map((n) => `<span class="cbadge" title="Présente dans ${esc(n)}">${esc(n)}</span>`).join("") : "";
       const row = `<tr data-key="${esc(r.key)}">
         <td class="c-check"><input type="checkbox" ${state.selected.has(r.key) ? "checked" : ""} aria-label="Sélectionner"></td>
-        <td><span class="rname" title="Afficher le détail">${esc(r.name)}</span>${flag}</td>
+        <td><span class="rname" title="Afficher le détail">${esc(r.name)}</span>${cb}${flag}</td>
         <td class="c-cat">${esc(r.category || "—")}</td>
         <td class="c-size">${fmtSize(r.size)}</td>
         <td class="c-added" title="${esc(fmtFull(r.added_on))}">${fmtDay(r.added_on)}</td>
@@ -312,6 +334,7 @@ function detailRow(r) {
   const rows = r.trackers.map((t) => {
     const copies = t.copies.map((h) => byHash.get(h)).filter(Boolean).map((c) =>
       `${c.cross_seed ? "ajoutée par cross-seed" : "torrent d'origine"} · ${esc(c.category || "sans catégorie")} · ` +
+      (multiClients() && clientsOf(c).length ? `${esc(clientsOf(c).join(", "))} · ` : "") +
       `<span class="mono" title="${esc(c.hash)}">${esc(c.hash.slice(0, 10))}…</span>`).join("<br>");
     const extra = t.state === "available" && t.match ? ` <span class="muted">(${esc(MATCH_TEXT[t.match] || t.match)})</span>` : "";
     return `<tr>
@@ -324,7 +347,7 @@ function detailRow(r) {
   const target = r.mode === "hash" ? `hash ${r.payload.infoHash.slice(0, 10)}…` : r.payload.path;
   return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="98">
     <h4>État par tracker</h4>
-    <table class="mini"><tr><th>Tracker</th><th>État</th><th>Dernière recherche</th><th>Copie dans qBittorrent</th></tr>${rows}</table>
+    <table class="mini"><tr><th>Tracker</th><th>État</th><th>Dernière recherche</th><th>Copie dans le client</th></tr>${rows}</table>
     <h4 style="margin-top:10px">Cible envoyée à cross-seed</h4><div class="mono">${esc(target)}</div>
   </td></tr>`;
 }
@@ -462,7 +485,7 @@ function queueRow(i) {
   const open = state.openItems.has(i.id);
   return `<tr data-item="${i.id}">
       <td><span class="st ${i.status}">${QLBL[i.status]}</span></td>
-      <td><div class="rname qname" title="Afficher le détail">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans qBittorrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
+      <td><div class="rname qname" title="Afficher le détail">${esc(i.name)}</div>${i.mode === "path" ? `<div class="rmeta"><span class="tag path" title="Aucun torrent d'origine dans les clients torrent : toutes les copies sont des cross-seeds">fichier trouvé uniquement en cross-seed</span></div>` : ""}</td>
       <td>${src}</td>
       <td>${resultHtml(i)}</td>
       <td class="c-when">${queueWhen(i)}</td>
@@ -710,7 +733,7 @@ $("#q-clear-done").addEventListener("click", async () => {
 // ---------- page 1, Chercher : « des releases (critères) → vers des trackers » ----------
 // Les choix sont gardés dans ce navigateur. Les releases cochées dans la liste remplacent les critères.
 const SEARCH_DEFAULT = { groups: [], categories: [], mode: "group", targets: [], text: "", rule: "", state: "",
-  onTracker: "", fresh: "all", days: 30, maxSeeds: "", limit: "" };
+  onTracker: "", client: "", fresh: "all", days: 30, maxSeeds: "", limit: "" };
 const search = Object.assign({}, SEARCH_DEFAULT, prefGet("search", {}));
 if (!["group", "manual"].includes(search.mode)) search.mode = search.targets.length ? "manual" : "group";
 search.rule = "";   // critère retiré : les règles ne servent plus qu'à l'ordre de passage
@@ -758,6 +781,11 @@ function renderSearch() {
 
   // affiner
   if (state.trackerLabels) search.onTracker = fillSelect($("#s-ontracker"), state.trackerLabels, search.onTracker, "Peu importe");
+  if (state.relClients.length) {   // filtre par client : seulement s'il y en a plusieurs
+    const names = state.relClients.map((c) => c.name);
+    $("#s-client-wrap").hidden = names.length < 2;
+    search.client = names.length > 1 ? fillSelect($("#s-client"), names, search.client, "Peu importe") : "";
+  }
   $("#s-text").value = search.text;
   $("#s-state").value = search.state;
   $("#s-fresh").value = search.fresh;
@@ -800,7 +828,7 @@ function renderSearch() {
 }
 
 function refineSummary() {
-  const n = [search.state, search.onTracker, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
+  const n = [search.state, search.onTracker, search.client, search.fresh !== "all", search.maxSeeds !== "", search.limit !== ""].filter(Boolean).length;
   $("#s-refine-sum").textContent = n ? `(${n} filtre${n > 1 ? "s" : ""})` : "";
 }
 
@@ -808,7 +836,7 @@ function criteria() {
   const c = { targets: search.mode === "manual" ? search.targets : [] };
   if (state.selected.size) { c.keys = [...state.selected]; return c; }
   Object.assign(c, { groups: search.groups, categories: search.categories, text: search.text,
-    state: search.state, on_tracker: search.onTracker, fresh: { mode: search.fresh, days: +search.days || 30 } });
+    state: search.state, on_tracker: search.onTracker, client: search.client, fresh: { mode: search.fresh, days: +search.days || 30 } });
   if (search.maxSeeds !== "") c.max_seeds = +search.maxSeeds;
   if (search.limit !== "") c.limit = +search.limit;
   return c;
@@ -878,7 +906,7 @@ $("#s-targets").addEventListener("click", (e) => {
   search.targets = search.targets.includes(k) ? search.targets.filter((x) => x !== k) : [...search.targets, k];
   searchChanged();
 });
-const REFINE = { "#s-text": "text", "#s-state": "state", "#s-ontracker": "onTracker", "#s-fresh": "fresh",
+const REFINE = { "#s-text": "text", "#s-state": "state", "#s-ontracker": "onTracker", "#s-client": "client", "#s-fresh": "fresh",
   "#s-days": "days", "#s-maxseeds": "maxSeeds", "#s-limit": "limit" };
 let refineTimer;
 for (const [sel, k] of Object.entries(REFINE)) {
@@ -893,7 +921,7 @@ for (const [sel, k] of Object.entries(REFINE)) {
   });
 }
 $("#s-reset").addEventListener("click", () => {
-  Object.assign(search, { rule: "", state: "", onTracker: "", fresh: "all", maxSeeds: "", limit: "" });
+  Object.assign(search, { rule: "", state: "", onTracker: "", client: "", fresh: "all", maxSeeds: "", limit: "" });
   searchChanged();
 });
 $("#s-when").addEventListener("click", (e) => {
@@ -954,21 +982,21 @@ async function loadPending() {
   let d;
   try { d = await api("/api/pending"); } catch (err) { $("#pending-list").innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
   // le badge ne compte que ce qui demande une action : une source pas terminée ou un torrent
-  // déjà dans qBittorrent se règlent tout seuls au prochain passage de cross-seed
+  // déjà dans un client torrent se règlent tout seuls au prochain passage de cross-seed
   const waits = (p) => p.reason === "incomplete" || p.reason === "present";
   const todo = d.items.filter((p) => !waits(p)), later = d.items.filter(waits);
   const cnt = $("#cnt-pending");
   cnt.textContent = todo.length || "";
   cnt.classList.toggle("hot", todo.length > 0);
   if (!d.items.length) {
-    $("#pending-list").innerHTML = `<p class="empty">Aucune injection en attente. Tout ce que cross-seed a trouvé est dans qBittorrent.</p>`;
+    $("#pending-list").innerHTML = `<p class="empty">Aucune injection en attente. Tout ce que cross-seed a trouvé est dans les clients torrent.</p>`;
     return;
   }
   $("#pending-list").innerHTML =
     (todo.length ? `<h3 class="p-sec">À regarder <b>${todo.length}</b></h3>${todo.map(card).join("")}`
       : `<p class="muted">Aucun échec d'injection.</p>`)
     + (later.length ? `<h3 class="p-sec">Se règlent tout seuls <b>${later.length}</b></h3>
-        <p class="muted">Source pas encore terminée, ou torrent déjà dans qBittorrent : cross-seed s'en occupe à son prochain passage.</p>${later.map(card).join("")}` : "")
+        <p class="muted">Source pas encore terminée, ou torrent déjà dans un client torrent : cross-seed s'en occupe à son prochain passage.</p>${later.map(card).join("")}` : "")
     + (d.writable ? "" : state.readonly
       ? `<p class="muted">Lecture seule (XSE_READONLY) : suppression désactivée.</p>`
       : `<p class="muted">Le dossier cross-seeds est monté en lecture seule : suppression impossible depuis l'interface.</p>`);
@@ -989,24 +1017,25 @@ async function loadPending() {
   }
 }
 const pct = (x) => `${Math.floor((x || 0) * 1000) / 10} %`;
-// Pourquoi ce torrent attend : déduit de l'état de qBittorrent
+// Pourquoi ce torrent attend : déduit de l'état des clients torrent
 function pendingReason(p) {
   if (p.reason === "incomplete") {
     const s = p.sources[0];
-    return `Source pas terminée dans qBittorrent (${pct(s.progress)}) : cross-seed attend la fin du téléchargement pour injecter, et retentera tout seul. Rien à faire.`;
+    return `Source pas terminée${inClient(s)} (${pct(s.progress)}) : cross-seed attend la fin du téléchargement pour injecter, et retentera tout seul. Rien à faire.`;
   }
-  if (p.reason === "present") return `Déjà dans qBittorrent (${pct(p.qbit.progress)}) : ce fichier sera retiré au prochain passage de cross-seed.`;
-  if (p.reason === "nosource") return "Aucun torrent de même taille dans qBittorrent : la source a sans doute été supprimée. Tu peux abandonner.";
+  if (p.reason === "present") return `Déjà${inClient(p.qbit) || " dans le client torrent"} (${pct(p.qbit.progress)}) : ce fichier sera retiré au prochain passage de cross-seed.`;
+  if (p.reason === "nosource") return "Aucun torrent de même taille dans les clients torrent : la source a sans doute été supprimée. Tu peux abandonner.";
+  if (p.reason === "partial") return `Aucun torrent de même taille dans les clients joignables ; ${(p.clients_down || []).join(", ")} ne répond pas et détient peut-être la source. Attends son retour avant d'abandonner.`;
   if (p.reason === "refused") return "Source terminée, mais l'injection a échoué (voir les erreurs ci-dessous ou les logs).";
   return "";
 }
 function pendingDetail(p) {
   const rows = [["Fichier", `<span class="mono">${esc(p.file)}</span>`], ["Hash trouvé", `<span class="mono">${esc(p.hash || "—")}</span>`]];
   if (p.total_size) rows.push(["Taille", fmtSize(p.total_size)]);
-  if (p.qbit) rows.push(["Dans qBittorrent", `${esc(p.qbit.name)} — ${pct(p.qbit.progress)}, ${esc(p.qbit.state)}`]);
-  if (p.sources === null) rows.push(["Source", "qBittorrent injoignable"]);
+  if (p.qbit) rows.push(["Déjà présent", `${esc(p.qbit.name)} — ${pct(p.qbit.progress)}, ${esc(p.qbit.state)}${esc(inClient(p.qbit))}`]);
+  if (p.sources === null) rows.push(["Source", "clients torrent injoignables"]);
   else rows.push(["Source probable", p.sources.length
-    ? p.sources.map((s) => `${esc(s.name)} — ${pct(s.progress)}, ${esc(s.state)}${s.category ? `, catégorie ${esc(s.category)}` : ""}`).join("<br>")
+    ? p.sources.map((s) => `${esc(s.name)} — ${pct(s.progress)}, ${esc(s.state)}${s.category ? `, catégorie ${esc(s.category)}` : ""}${esc(inClient(s))}`).join("<br>")
     : "aucun torrent de même taille"]);
   return `<dl class="kv pdetail">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
 }
@@ -1543,7 +1572,7 @@ function startEdit(s) {
   state.selected.clear();
   Object.assign(search, SEARCH_DEFAULT, {
     groups: c.groups || [], categories: c.categories || [], text: c.text || "", state: c.state || "",
-    onTracker: c.on_tracker || "", fresh: (c.fresh && c.fresh.mode) || "all", days: (c.fresh && c.fresh.days) || 30,
+    onTracker: c.on_tracker || "", client: c.client || "", fresh: (c.fresh && c.fresh.mode) || "all", days: (c.fresh && c.fresh.days) || 30,
     maxSeeds: c.max_seeds ?? "", limit: c.limit ?? "",
     mode: (c.targets || []).length ? "manual" : "group", targets: c.targets || [],
     when: "repeat", every: s.every_hours, name: s.name,
@@ -1561,6 +1590,24 @@ function endEdit(restore) {
   if (restore) showCsub("prog");
 }
 
+function renderClients() {
+  const cl = state.clients || [];
+  const ign = state.clientsIgnored || [];
+  $("#clients-intro").textContent = `Lus depuis : ${state.clientsOrigin || "?"}. XSE lit les torrents de tous ces clients ` +
+    "(une même release présente dans plusieurs n'apparaît qu'une fois) ; il n'y envoie aucune action. " +
+    "Le nom sert aux badges et au filtre « Dans le client » ; laisse vide pour le nom automatique." +
+    (ign.length ? ` Entrées ignorées : ${ign.join(" ; ")}` : "");
+  $("#clients-list").innerHTML = cl.length ? cl.map((c) => `
+    <span class="pill ${c.ok ? "ok" : "ko"}" title="${esc(c.ok ? "" : c.error)}"><i></i>${esc(c.type_label)} ${esc(c.ok ? c.version : "injoignable")}</span>
+    <code title="${esc(c.ok ? "" : c.error)}">${esc(c.url)}</code>
+    ${c.env_name
+      ? `<span class="muted" title="Nom fixé dans le .env (TORRENT_CLIENT_N_NAME)">${esc(c.env_name)} (.env)</span>`
+      : `<input type="text" data-client="${esc(c.id)}" value="${esc(c.custom_name)}" placeholder="${esc(c.default_name)}" maxlength="40">`}`).join("")
+    : `<p class="muted">Aucun client torrent configuré.</p>`;
+}
+
+$("#clients-list").addEventListener("input", () => { state.settingsDirty = true; });
+
 function renderAliases() {
   const aliases = state.settings.tracker_aliases || {};
   const hosts = Object.keys(state.trackers).filter(Boolean).sort();
@@ -1576,6 +1623,7 @@ async function renderSettings() {
   renderGroups();
   renderScan();
   renderAliases();
+  renderClients();
   renderSources();
   renderXsForm();
   loadIndexers();
@@ -1782,13 +1830,16 @@ async function saveSettings() {
   if (unnamed) { toast(`Donne un nom à chaque groupe de trackers (${unnamed} sans nom)`, true); return false; }
   const aliases = {};
   $$("#aliases input").forEach((i) => { if (i.value.trim()) aliases[i.dataset.host] = i.value.trim(); });
+  const clientNames = {};
+  $$("#clients-list input[data-client]").forEach((i) => { if (i.value.trim()) clientNames[i.dataset.client] = i.value.trim(); });
   try {
     state.settings = await api("/api/settings", {
       method: "PUT",
-      body: { delay: +$("#set-delay").value, rules: state.settings.rules, groups: state.settings.groups, tracker_aliases: aliases },
+      body: { delay: +$("#set-delay").value, rules: state.settings.rules, groups: state.settings.groups, tracker_aliases: aliases, client_names: clientNames },
     });
     state.settingsDirty = false;
     toast("Réglages enregistrés");
+    await loadHealth();   // noms des clients
     await loadReleases();
     renderSettings();
     return true;

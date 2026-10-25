@@ -436,6 +436,65 @@ def _kind(raw: str) -> str:
     return "other"
 
 
+def _js_strings(text: str, start: int) -> list:
+    """Chaînes littérales d'un tableau JS commençant juste après « [ », jusqu'au « ] » correspondant.
+    Les commentaires sont ignorés : une ligne commentée est un client désactivé."""
+    out, i, n, depth = [], start, len(text), 0
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            i = text.find("\n", i)
+            i = n if i < 0 else i
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c in "'\"`":
+            j, buf = i + 1, []
+            while j < n and text[j] != c:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 1
+                buf.append(text[j])
+                j += 1
+            out.append("".join(buf))
+            i = j + 1
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            if depth == 0:
+                break
+            depth -= 1
+        i += 1
+    return out
+
+
+def torrent_client_entries() -> list:
+    """Entrées torrentClients de cross-seed (« qbittorrent:http://… »), dans l'ordre.
+    v6 : config.js (un tableau construit autrement qu'avec des chaînes, process.env par exemple,
+    n'est pas lu) ; v7 : ses réglages en base."""
+    if config.XS_VERSION == "7":
+        con = _connect()
+        if not con:
+            return []
+        try:
+            row = con.execute("SELECT settings_json FROM settings LIMIT 1").fetchone()
+            value = (json.loads(row[0]) if row and row[0] else {}).get("torrentClients")
+        except (sqlite3.Error, ValueError):
+            value = None
+        finally:
+            con.close()
+        return [str(v) for v in value if isinstance(v, str)] if isinstance(value, list) else []
+    text = _config_text()
+    for m in re.finditer(r"\btorrentClients\s*:\s*\[", text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        if "//" in text[line_start:m.start()]:
+            continue   # déclaration commentée
+        return _js_strings(text, m.end())
+    return []
+
+
 def pending_dir():
     """Dossier des torrents trouvés mais non injectés. v6 : cross-seeds/ (outputDir null).
     v7 : outputDir, obligatoire, lu dans ses réglages ; un chemin /config/... du conteneur

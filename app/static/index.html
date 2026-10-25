@@ -14,7 +14,7 @@
     <span class="brand-name">cross-seed <em>enhanced</em></span>
   </div>
   <div class="health" id="health">
-    <span class="pill" id="pill-qbit"><i></i>qBittorrent</span>
+    <span id="pills-clients"><span class="pill"><i></i>Clients torrent</span></span>
     <span class="pill" id="pill-xs"><i></i>cross-seed</span>
   </div>
 </header>
@@ -54,6 +54,7 @@
           <summary>Affiner <span id="s-refine-sum"></span></summary>
           <div class="refine-grid">
             <label class="field">Présente sur le tracker<select id="s-ontracker"><option value="">Peu importe</option></select></label>
+            <label class="field" id="s-client-wrap" hidden>Dans le client<select id="s-client"><option value="">Peu importe</option></select></label>
             <label class="field">État
               <select id="s-state">
                 <option value="">Peu importe</option>
@@ -117,7 +118,7 @@
               <summary class="ghost">Colonnes</summary>
               <div class="colpick-menu" id="rel-cols-menu"></div>
             </details>
-            <button class="ghost" id="rel-refresh" title="Recharger depuis qBittorrent">Actualiser</button>
+            <button class="ghost" id="rel-refresh" title="Recharger depuis les clients torrent">Actualiser</button>
           </span>
         </div>
         <div class="selbar" id="rel-selbar" hidden>
@@ -136,7 +137,7 @@
               <th data-sort="name">Release</th>
               <th class="c-cat" data-sort="category">Catégorie</th>
               <th class="c-size" data-sort="size">Taille</th>
-              <th class="c-added" data-sort="added" title="Date d'ajout dans qBittorrent de la copie la plus ancienne">Ajoutée</th>
+              <th class="c-added" data-sort="added" title="Date d'ajout dans le client torrent de la copie la plus ancienne">Ajoutée</th>
               <th class="c-last" data-sort="last" title="Dernière recherche, tous trackers confondus">Dernière recherche</th>
               <th class="c-copies" data-sort="seeds" title="État de la release sur chaque tracker ; tri par nombre de trackers en seed">Trackers</th>
               <th class="c-act"></th>
@@ -196,7 +197,7 @@
 
       <div id="sub-pending" hidden>
         <div class="queue-head">
-          <p class="muted">Torrents trouvés par cross-seed mais pas encore injectés dans qBittorrent : soit leur source n'est pas terminée (cross-seed attend la fin du téléchargement), soit l'injection a échoué. cross-seed les retente toutes les heures ; « Retenter maintenant » le fait tout de suite.</p>
+          <p class="muted">Torrents trouvés par cross-seed mais pas encore injectés dans un client torrent : soit leur source n'est pas terminée (cross-seed attend la fin du téléchargement), soit l'injection a échoué. cross-seed les retente toutes les heures ; « Retenter maintenant » le fait tout de suite.</p>
           <div class="btns"><button class="ghost" data-job="inject">Retenter maintenant</button></div>
         </div>
         <div id="pending-list"></div>
@@ -242,7 +243,7 @@
       <div class="savebar"><button class="primary" id="src-save">Enregistrer les sources</button></div>
 
       <h2 id="set-groups">Groupes de trackers</h2>
-      <p class="muted">Un groupe réunit des catégories qBittorrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible de « Selon le groupe » dans Chercher et du bouton « Chercher » d'une release. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
+      <p class="muted">Un groupe réunit des catégories des clients torrent et les trackers sur lesquels les chercher, selon ta propre organisation (par exemple « Vidéo » : radarr, sonarr et tes trackers films et séries ; « Musique » : lidarr et tes trackers musique). C'est la cible de « Selon le groupe » dans Chercher et du bouton « Chercher » d'une release. Une catégorie rangée dans aucun groupe est cherchée par cross-seed sur tous ses indexers.</p>
       <p class="muted">Pour un groupe, l'interface interroge elle-même les trackers cochés, puis soumet les résultats plausibles à cross-seed, qui vérifie et injecte comme d'habitude. Le scan complet de cross-seed, son RSS et son announce ne sont pas concernés.</p>
       <div id="groups"></div>
       <button class="ghost" id="group-add">Ajouter un groupe</button>
@@ -265,8 +266,12 @@
         <span><input type="number" id="set-delay" min="5" max="3600"> secondes</span>
       </label>
 
+      <h2 id="set-clients">Clients torrent</h2>
+      <p class="muted" id="clients-intro"></p>
+      <div id="clients-list" class="clients-list"></div>
+
       <h2>Noms des trackers</h2>
-      <p class="muted">Nom affiché pour chaque tracker détecté dans qBittorrent. Laisse vide pour garder le nom automatique : celui de l'indexer Prowlarr ou Jackett du même site s'il existe, sinon le domaine.</p>
+      <p class="muted">Nom affiché pour chaque tracker détecté dans les clients torrent. Laisse vide pour garder le nom automatique : celui de l'indexer Prowlarr ou Jackett du même site s'il existe, sinon le domaine.</p>
       <div id="aliases" class="aliases"></div>
 
       <div class="savebar"><button class="primary" id="set-save">Enregistrer les réglages</button></div>

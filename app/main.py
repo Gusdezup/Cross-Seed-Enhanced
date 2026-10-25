@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import clients, config, demandes, jackett, logs, prowlarr, releases, routing, scan, schedules, xsdb
+from . import torrentclients
 from .worker import queue
 
 STATIC = Path(__file__).parent / "static"
@@ -56,11 +57,15 @@ async def basic_auth(request: Request, call_next):
 
 @app.get("/api/status")
 async def status():
-    out = {"qbit": {"ok": False}, "xs": {"ok": False}, "files": {}}
-    try:
-        out["qbit"] = {"ok": True, "version": await clients.qbit_version()}
-    except Exception as e:  # noqa: BLE001
-        out["qbit"]["error"] = str(e)[:200]
+    out = {"xs": {"ok": False}, "files": {}}
+    tc = await torrentclients.status()
+    out["clients"] = tc["clients"]
+    out["clients_origin"] = tc["origin"]
+    out["clients_ignored"] = tc["ignored"]
+    # Ancien champ (un seul qBittorrent) : premier client
+    first = tc["clients"][0] if tc["clients"] else {"ok": False, "version": "", "error": "aucun client"}
+    out["qbit"] = {"ok": all(c["ok"] for c in tc["clients"]) and bool(tc["clients"]),
+                   "version": first["version"], "error": first["error"]}
     try:
         out["xs"] = {"ok": await clients.xs_ping()}
     except Exception as e:  # noqa: BLE001
@@ -84,17 +89,16 @@ async def status():
 @app.get("/api/releases")
 async def list_releases(refresh: bool = False):
     try:
-        torrents = await clients.qbit_torrents(force=refresh)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"qBittorrent injoignable : {e}") from e
+        snap = await torrentclients.snapshot(force=refresh)
+    except torrentclients.Unavailable as e:
+        raise HTTPException(502, f"Clients torrent injoignables : {e}") from e
+    # Torrents terminés (comme le filtre « completed » de qBittorrent) ; hashs de tous les torrents
+    torrents = [t for t in snap["torrents"] if (t.get("progress") or 0) >= 1]
+    all_hashes = {t["hash"] for t in snap["torrents"]}
     settings = config.load_settings()
     names = {**await jackett.site_names(), **await prowlarr.site_names()}
     items = releases.build(torrents, settings, names)
     resolve = releases.make_resolver(settings, names)
-    try:
-        all_hashes = await clients.qbit_hashes()
-    except Exception:  # noqa: BLE001
-        all_hashes = {t["hash"].lower() for t in torrents}
     state = await asyncio.to_thread(xsdb.search_state)
     labels = await _indexer_labels(resolve)
     releases.attach_trackers(items, state, labels, all_hashes, resolve)
@@ -115,7 +119,8 @@ async def list_releases(refresh: bool = False):
         for c in r["copies"]:
             trackers.setdefault(c["host"], c["tracker"])
     out = {"releases": items, "trackers": trackers, "torrents": len(torrents),
-           "indexers": [{"key": k, "label": v} for k, v in active.items()]}
+           "indexers": [{"key": k, "label": v} for k, v in active.items()],
+           "clients": snap["clients"]}
     _rel_cache.update(ts=time.time(), data=out)
     return out
 
@@ -473,32 +478,37 @@ def _torrent_meta(path) -> dict:
 
 
 async def _pending_sources(items: list) -> None:
-    """Pour chaque injection en attente : le torrent trouvé est-il déjà dans qBittorrent,
-    et dans quel état sont les torrents locaux de même taille (sa source probable).
+    """Pour chaque injection en attente : le torrent trouvé est-il déjà dans un client torrent,
+    et dans quel état sont les torrents locaux de même taille (sa source probable), tous clients confondus.
     cross-seed n'injecte pas tant que la source n'est pas terminée : il garde le .torrent
     et retente à chaque passage du job inject."""
     try:
-        torrents = await clients._qbit_all()
-    except Exception:  # noqa: BLE001  qBittorrent injoignable : pas de diagnostic
+        snap = await torrentclients.snapshot()
+    except torrentclients.Unavailable:   # aucun client ne répond : pas de diagnostic
         for it in items:
-            it.update(qbit=None, sources=None, reason=None)
+            it.update(qbit=None, sources=None, reason=None, clients_down=[])
         return
-    by_hash = {(t.get("hash") or "").lower(): t for t in torrents}
+    torrents = snap["torrents"]
+    down = [c["name"] for c in snap["clients"] if not c["ok"]]
+    by_hash = {t["hash"]: t for t in torrents}
     view = lambda t: {"name": t.get("name"), "progress": t.get("progress") or 0,  # noqa: E731
-                      "state": t.get("state"), "category": t.get("category") or ""}
+                      "state": t.get("state"), "category": t.get("category") or "",
+                      "client": t.get("client") or "", "clients": t.get("clients") or []}
     for it in items:
+        it["clients_down"] = down
         t = by_hash.get((it.get("hash") or "").lower())
         it["qbit"] = view(t) if t else None
         size = it.get("total_size")
         srcs = [view(x) for x in torrents if size and x.get("total_size") == size
-                and (x.get("hash") or "").lower() != (it.get("hash") or "").lower()]
+                and x["hash"] != (it.get("hash") or "").lower()]
         it["sources"] = srcs
         if t:
             it["reason"] = "present"
         elif srcs and all(s["progress"] < 1 for s in srcs):
             it["reason"] = "incomplete"
         elif not srcs and size:
-            it["reason"] = "nosource"
+            # un client injoignable peut détenir la source : on ne conseille pas d'abandonner
+            it["reason"] = "partial" if down else "nosource"
         else:
             it["reason"] = "refused"
 
@@ -711,9 +721,12 @@ async def put_settings(body: dict):
             raise HTTPException(400, f"Expression invalide pour « {r.get('name') or r.get('value')} » : {e}") from e
     body.pop("sources", None)   # les sources passent par /api/sources
     try:
-        return config.public_settings(config.save_settings(body))
+        saved = config.save_settings(body)
     except (TypeError, ValueError) as e:
         raise HTTPException(400, str(e)) from e
+    if "client_names" in body:
+        torrentclients.reset()   # noms des clients : pris en compte tout de suite
+    return config.public_settings(saved)
 
 
 # --- sources d'indexers (Prowlarr, Jackett) ---------------------------------------
