@@ -97,6 +97,20 @@ def test_config_js_torrent_clients(tmp_path):
     assert xsdb.torrent_client_entries() == ["rtorrent:http://h/RPC2"]
 
 
+def test_config_js_template_examples_are_ignored(tmp_path):
+    """Modèle de config.js de cross-seed : exemples dans un commentaire /* */, vraie ligne après."""
+    write_config(tmp_path, """    /**
+     * torrentClients: ["qbittorrent:http://username:password@localhost:8080"]
+     *
+     * torrentClients: ["deluge:http://:password@localhost:8112/json"]
+     * e.g. "qbittorrent:readonly:http://username:password@localhost:8080"
+     */
+    torrentClients: ["qbittorrent:http://gus:pw@192.168.1.20:8081"],
+    /** url: "http://exemple/*pas un commentaire*/" */
+    torznab: [],""")
+    assert xsdb.torrent_client_entries() == ["qbittorrent:http://gus:pw@192.168.1.20:8081"]
+
+
 def test_legacy_qbt_url_alone(tmp_path):
     """Rétro-compatibilité : sans TORRENT_CLIENT_N ni torrentClients, QBT_URL et QBT_APIKEY."""
     config.QBT_URL, config.QBT_APIKEY, config.QBT_URL_SET = "http://192.168.1.10:8080", "k", True

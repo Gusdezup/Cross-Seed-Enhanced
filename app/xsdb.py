@@ -487,12 +487,35 @@ def torrent_client_entries() -> list:
             con.close()
         return [str(v) for v in value if isinstance(v, str)] if isinstance(value, list) else []
     text = _config_text()
-    for m in re.finditer(r"\btorrentClients\s*:\s*\[", text):
-        line_start = text.rfind("\n", 0, m.start()) + 1
-        if "//" in text[line_start:m.start()]:
-            continue   # déclaration commentée
-        return _js_strings(text, m.end())
-    return []
+    m = re.search(r"\btorrentClients\s*:\s*\[", _blank_comments(text))
+    return _js_strings(text, m.end()) if m else []
+
+
+def _blank_comments(text: str) -> str:
+    """Le texte avec ses commentaires // et /* */ remplacés par des espaces (positions conservées),
+    pour ne pas prendre les exemples du modèle de config.js pour une vraie déclaration."""
+    out, i, n = list(text), 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+        elif text[i] in "'\"`":
+            q, j = text[i], i + 1
+            while j < n and text[j] != q and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+            continue
+        else:
+            i += 1
+            continue
+        for k in range(i, j):
+            if out[k] != "\n":
+                out[k] = " "
+        i = j
+    return "".join(out)
 
 
 def pending_dir():
