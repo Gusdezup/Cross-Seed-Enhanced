@@ -216,13 +216,14 @@ async function loadReleases(refresh = false) {
     const d = await api(`/api/releases${refresh ? "?refresh=1" : ""}`);
     state.releases = d.releases;
     state.trackers = d.trackers;
+    state.releasesLoaded = true;
     state.torrents = d.torrents;
     state.indexers = d.indexers || [];
     state.relClients = d.clients || [];
     state.trackerLabels = [...new Set(Object.values(d.trackers))].sort((a, b) => a.localeCompare(b));
     for (const k of [...state.selected]) if (!state.releases.some((r) => r.key === k)) state.selected.delete(k);
     $("#cnt-releases").textContent = d.releases.length;
-    if (state.tab === "settings" && state.settings) { renderRules(); renderGroups(); renderAliases(); }
+    if (state.tab === "settings" && state.settings) { renderRules(); renderGroups(); renderAliases(); renderClients(); }
     renderSearch();
   } catch (err) {
     $("#rel-summary").textContent = err.message;
@@ -1595,6 +1596,8 @@ function renderClients() {
   const ign = state.clientsIgnored || [];
   $("#clients-intro").textContent = `Lus depuis : ${state.clientsOrigin || "?"}. XSE lit les torrents de tous ces clients ` +
     "(une même release présente dans plusieurs n'apparaît qu'une fois) ; il n'y envoie aucune action. " +
+    "Pour ajouter un client, déclare-le dans torrentClients de cross-seed (il doit le connaître pour y chercher et injecter) " +
+    "puis redémarre cross-seed ; XSE le voit dans la minute. TORRENT_CLIENT_1, _2… dans le .env imposent une autre liste. " +
     "Le nom sert aux badges et au filtre « Dans le client » ; laisse vide pour le nom automatique." +
     (ign.length ? ` Entrées ignorées : ${ign.join(" ; ")}` : "");
   $("#clients-list").innerHTML = cl.length ? cl.map((c) => `
@@ -1613,7 +1616,7 @@ function renderAliases() {
   const hosts = Object.keys(state.trackers).filter(Boolean).sort();
   $("#aliases").innerHTML = hosts.length ? hosts.map((h) =>
     `<code>${esc(h)}</code><input type="text" data-host="${esc(h)}" value="${esc(aliases[h] || "")}" placeholder="${esc(state.trackers[h])}">`).join("")
-    : `<p class="muted">Aucun tracker détecté (charge d'abord l'onglet Releases).</p>`;
+    : `<p class="muted">${state.releasesLoaded ? "Aucun tracker détecté dans les clients torrent." : "Lecture des torrents en cours…"}</p>`;
 }
 
 async function renderSettings() {
