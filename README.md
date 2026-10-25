@@ -81,7 +81,7 @@ cross-seed enhanced lit les torrents de **tous** tes clients, comme cross-seed, 
 2. Sinon, **`torrentClients` de cross-seed** (`config.js` en v6, ses réglages en v7) : rien à configurer, mêmes clients et même ordre que cross-seed. Le qBittorrent du port de `QBT_URL` reprend l'adresse et la clé API de `QBT_URL` ; `localhost` (cross-seed dans le réseau de Gluetun, par exemple) est remplacé par `TORRENT_CLIENT_HOST`, à défaut par l'hôte de `QBT_URL`.
 3. Sinon, **`QBT_URL` et `QBT_APIKEY`** (un seul qBittorrent, l'ancien format, toujours valable).
 
-Une même release présente dans plusieurs clients n'apparaît qu'une fois. Un client injoignable est signalé (pastille rouge, liste marquée incomplète) et ses torrents manquent jusqu'à son retour. Catégorie lue selon le client : catégorie qBittorrent, étiquette ruTorrent, premier label Transmission (≥ 4.0), plugin Label de Deluge. Le nom de chaque client se change dans **Réglages › Clients torrent** (`TORRENT_CLIENT_N_NAME` reste prioritaire).
+Une même release présente dans plusieurs clients n'apparaît qu'une fois. Un client injoignable est signalé (pastille rouge, liste marquée incomplète) et ses torrents manquent jusqu'à son retour. Catégorie lue selon le client : catégorie qBittorrent, étiquette ruTorrent, premier label Transmission (≥ 4.0), plugin Label de Deluge. Dans **Réglages › Clients torrent** : nom affiché de chaque client (`TORRENT_CLIENT_N_NAME` reste prioritaire) et, avec cross-seed v6, ajout et retrait de clients dans `torrentClients` de `config.js` (sauvegarde préalable, essai de connexion avant écriture, case « lecture seule »), puis redémarrage de cross-seed. Le dernier client ne peut pas être retiré.
 
 ### cross-seed v7 (expérimental)
 

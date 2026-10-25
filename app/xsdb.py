@@ -491,6 +491,82 @@ def torrent_client_entries() -> list:
     return _js_strings(text, m.end()) if m else []
 
 
+def _torrent_clients_span(text: str):
+    """(position du « [ », position du « ] ») du tableau torrentClients de config.js, ou None."""
+    blank = _blank_comments(text)
+    m = re.search(r"\btorrentClients\s*:\s*\[", blank)
+    if not m:
+        return None
+    i, n, depth = m.end(), len(blank), 0
+    while i < n:
+        c = blank[i]
+        if c in "'\"`":
+            j = i + 1
+            while j < n and blank[j] != c:
+                j += 2 if blank[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            if depth == 0:
+                return m.end() - 1, i
+            depth -= 1
+        i += 1
+    return None
+
+
+def _set_torrent_clients(entries: list) -> dict:
+    """Réécrit le tableau torrentClients de config.js, une entrée par ligne (sauvegarde préalable).
+    Les lignes commentées à l'intérieur du tableau sont conservées à la fin."""
+    if config.XS_VERSION == "7":
+        raise ValueError("cross-seed v7 : les clients torrent se gèrent dans son interface native")
+    text = _config_text()
+    span = _torrent_clients_span(text)
+    if span is None:
+        raise ValueError("Tableau torrentClients introuvable dans config.js")
+    start, end = span
+    line_start = text.rfind("\n", 0, start) + 1
+    base = _indent(text[line_start:start])
+    inner = text[start + 1:end]
+    comments = [ln.strip() for ln in inner.split("\n") if ln.strip().startswith("//")]
+    body = [f"{base}  {json.dumps(e, ensure_ascii=False)}," for e in entries] + [f"{base}  {c}" for c in comments]
+    new = text[:start] + "[\n" + "\n".join(body) + "\n" + base + text[end:]
+    return _write_config(text, new)
+
+
+def add_torrent_client(entry: str) -> dict:
+    """Ajoute un client à torrentClients (déjà présent, même adresse : aucun changement)."""
+    c = config.parse_client(entry)
+    entries = torrent_client_entries()
+    ids = set()
+    for e in entries:
+        try:
+            ids.add(config.client_id(config.parse_client(e)))
+        except ValueError:
+            pass
+    if config.client_id(c) in ids:
+        return {"changed": False, "backup": None}
+    return _set_torrent_clients(entries + [entry])
+
+
+def remove_torrent_client(cid: str) -> dict:
+    """Retire de torrentClients le client de cet identifiant (jamais le dernier)."""
+    entries = torrent_client_entries()
+
+    def ident(e):
+        try:
+            return config.client_id(config.parse_client(e))
+        except ValueError:
+            return None
+    keep = [e for e in entries if ident(e) != cid]
+    if len(keep) == len(entries):
+        raise ValueError("Client absent de torrentClients dans config.js")
+    if not keep:
+        raise ValueError("Impossible de retirer le dernier client : cross-seed en a besoin")
+    return _set_torrent_clients(keep)
+
+
 def _blank_comments(text: str) -> str:
     """Le texte avec ses commentaires // et /* */ remplacés par des espaces (positions conservées),
     pour ne pas prendre les exemples du modèle de config.js pour une vraie déclaration."""

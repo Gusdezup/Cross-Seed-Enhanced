@@ -11,7 +11,11 @@ async function api(path, opts = {}) {
   const r = await fetch(path, init);
   let data = null;
   try { data = await r.json(); } catch { /* vide */ }
-  if (!r.ok) throw new Error((data && data.detail) || `Erreur HTTP ${r.status}`);
+  if (!r.ok) {
+    const err = new Error((data && data.detail) || `Erreur HTTP ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
   return data;
 }
 
@@ -148,6 +152,7 @@ async function loadHealth() {
     }).join("") : `<span class="pill ko"><i></i>Aucun client torrent</span>`;
     state.clientsOrigin = s.clients_origin || "";
     state.clientsIgnored = s.clients_ignored || [];
+    state.clientsEditable = !!s.clients_editable;
     if (state.tab === "settings") renderClients();
     if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
       x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
@@ -1596,8 +1601,10 @@ function renderClients() {
   const ign = state.clientsIgnored || [];
   $("#clients-intro").textContent = `Lus depuis : ${state.clientsOrigin || "?"}. XSE lit les torrents de tous ces clients ` +
     "(une même release présente dans plusieurs n'apparaît qu'une fois) ; il n'y envoie aucune action. " +
-    "Pour ajouter un client, déclare-le dans torrentClients de cross-seed (il doit le connaître pour y chercher et injecter) " +
-    "puis redémarre cross-seed ; XSE le voit dans la minute. TORRENT_CLIENT_1, _2… dans le .env imposent une autre liste. " +
+    (state.clientsEditable
+      ? "Ajouter ou retirer un client ici modifie torrentClients dans config.js ; cross-seed le prend en compte après redémarrage. "
+      : "Pour ajouter un client, déclare-le dans torrentClients de cross-seed (il doit le connaître pour y chercher et injecter), puis redémarre cross-seed. ") +
+    (state.clientsOrigin.startsWith(".env (TORRENT") ? "Attention : TORRENT_CLIENT_N du .env impose la liste lue par XSE, config.js ne la change pas. " : "") +
     "Le nom sert aux badges et au filtre « Dans le client » ; laisse vide pour le nom automatique." +
     (ign.length ? ` Entrées ignorées : ${ign.join(" ; ")}` : "");
   $("#clients-list").innerHTML = cl.length ? cl.map((c) => `
@@ -1605,9 +1612,69 @@ function renderClients() {
     <code title="${esc(c.ok ? "" : c.error)}">${esc(c.url)}</code>
     ${c.env_name
       ? `<span class="muted" title="Nom fixé dans le .env (TORRENT_CLIENT_N_NAME)">${esc(c.env_name)} (.env)</span>`
-      : `<input type="text" data-client="${esc(c.id)}" value="${esc(c.custom_name)}" placeholder="${esc(c.default_name)}" maxlength="40">`}`).join("")
+      : `<input type="text" data-client="${esc(c.id)}" value="${esc(c.custom_name)}" placeholder="${esc(c.default_name)}" maxlength="40">`}
+    <span>${c.readonly ? `<span class="tag" title="readonly: cross-seed y cherche sans y injecter">lecture seule</span> ` : ""}${
+      state.clientsEditable && c.source === "cross-seed" && cl.filter((x) => x.source === "cross-seed").length > 1
+        ? `<button class="small ghost" data-client-rm="${esc(c.raw_id)}" data-client-name="${esc(c.name)}">Retirer</button>` : ""}</span>`).join("")
     : `<p class="muted">Aucun client torrent configuré.</p>`;
+  $("#client-add-wrap").hidden = !state.clientsEditable;
+  caPlaceholder();
 }
+const CA_PH = { qbittorrent: "http://192.168.1.20:8080", rtorrent: "http://192.168.1.20/RPC2",
+  transmission: "http://192.168.1.20:9091/transmission/rpc", deluge: "http://192.168.1.20:8112/json" };
+function caPlaceholder() { $("#ca-url").placeholder = CA_PH[$("#ca-type").value]; }
+$("#ca-type").addEventListener("change", caPlaceholder);
+const caBody = () => ({ type: $("#ca-type").value, url: $("#ca-url").value.trim(), user: $("#ca-user").value.trim(),
+  password: $("#ca-pass").value, readonly: $("#ca-ro").checked });
+function caResult(ok, text) {
+  const r = $("#ca-result");
+  r.className = ok ? "ok-msg" : "ko-msg";
+  r.textContent = text;
+}
+$("#ca-test").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  caResult(true, "Essai…");
+  try {
+    const r = await api("/api/clients/test", { method: "POST", body: caBody() });
+    caResult(r.ok, r.ok ? `OK : version ${r.version}, ${r.torrents} torrents (${r.url})` : `${r.url} : ${r.error}`);
+  } catch (err) { caResult(false, err.message); }
+  e.target.disabled = false;
+});
+async function clientsChanged(r) {
+  if (r.changed) {
+    toast(`config.js modifié (sauvegarde : ${r.backup})`);
+    $("#clients-restart").hidden = !state.restartAvailable;
+  }
+  await loadHealth();
+  loadReleases();
+}
+$("#ca-add").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try {
+    let r;
+    try {
+      r = await api("/api/clients/add", { method: "POST", body: caBody() });
+    } catch (err) {
+      if (err.status !== 409) throw err;
+      // essai raté depuis XSE : l'adresse peut n'être joignable que par cross-seed (réseau de Gluetun…)
+      if (!confirm(`XSE n'arrive pas à joindre ce client : ${err.message}\n\nL'ajouter quand même à config.js ?`)) throw null;
+      r = await api("/api/clients/add", { method: "POST", body: { ...caBody(), force: true } });
+    }
+    caResult(true, r.changed ? "Ajouté à config.js" : "Déjà présent dans config.js");
+    if (r.changed) { $("#ca-url").value = ""; $("#ca-user").value = ""; $("#ca-pass").value = ""; $("#ca-ro").checked = false; }
+    await clientsChanged(r);
+  } catch (err) { if (err) caResult(false, err.message); }
+  e.target.disabled = false;
+});
+$("#clients-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-client-rm]");
+  if (!b) return;
+  if (!confirm(`Retirer ${b.dataset.clientName} de torrentClients dans config.js ? cross-seed ne l'utilisera plus après son redémarrage.`)) return;
+  b.disabled = true;
+  try { await clientsChanged(await api("/api/clients/remove", { method: "POST", body: { raw_id: b.dataset.clientRm } })); }
+  catch (err) { toast(err.message, true); b.disabled = false; }
+});
+$("#clients-restart").addEventListener("click", async (e) => { if (await restartXs(e.target)) e.target.hidden = true; });
 
 $("#clients-list").addEventListener("input", () => { state.settingsDirty = true; });
 

@@ -62,6 +62,7 @@ async def status():
     out["clients"] = tc["clients"]
     out["clients_origin"] = tc["origin"]
     out["clients_ignored"] = tc["ignored"]
+    out["clients_editable"] = tc["editable"]
     # Ancien champ (un seul qBittorrent) : premier client
     first = tc["clients"][0] if tc["clients"] else {"ok": False, "version": "", "error": "aucun client"}
     out["qbit"] = {"ok": all(c["ok"] for c in tc["clients"]) and bool(tc["clients"]),
@@ -662,6 +663,49 @@ async def put_xs_settings(body: dict):
     except (ValueError, OSError) as e:
         raise HTTPException(400, str(e)) from e
     res["settings"] = await asyncio.to_thread(xsdb.useful_settings)
+    return res
+
+
+# --- clients torrent (torrentClients de config.js) ----------------------------------
+
+def _client_entry(body: dict) -> str:
+    return config.build_client_entry(body.get("type"), body.get("url"), str(body.get("user") or ""),
+                                     str(body.get("password") or ""), bool(body.get("readonly")))
+
+
+@app.post("/api/clients/test")
+async def client_test(body: dict):
+    try:
+        entry = _client_entry(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return await torrentclients.test(entry)
+
+
+@app.post("/api/clients/add")
+async def client_add(body: dict):
+    """Ajoute un client à torrentClients de config.js (cross-seed le prend en compte au redémarrage).
+    Essayé d'abord depuis XSE, sauf si force (adresse joignable par cross-seed seulement)."""
+    try:
+        entry = _client_entry(body)
+        if not body.get("force"):
+            t = await torrentclients.test(entry)
+            if not t["ok"]:
+                raise HTTPException(409, f"{t['url']} : {t['error']}")
+        res = await asyncio.to_thread(xsdb.add_torrent_client, entry)
+    except (ValueError, OSError) as e:
+        raise _config_error(e) from e
+    torrentclients.reset()
+    return res
+
+
+@app.post("/api/clients/remove")
+async def client_remove(body: dict):
+    try:
+        res = await asyncio.to_thread(xsdb.remove_torrent_client, str(body.get("raw_id", "")))
+    except (ValueError, OSError) as e:
+        raise _config_error(e) from e
+    torrentclients.reset()
     return res
 
 

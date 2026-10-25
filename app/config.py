@@ -5,7 +5,7 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 # Client torrent unique, format historique (qBittorrent seul). Voir aussi TORRENT_CLIENT_N plus bas.
 QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
@@ -66,10 +66,27 @@ def parse_client(entry: str) -> dict:
     except ValueError as e:
         raise ValueError(f"Port invalide : {_hide_password(m.group(3))}") from e
     host = p.hostname or ""
-    return {"type": kind, "scheme": p.scheme, "host": host, "port": port,
+    return {"type": kind, "readonly": bool(m.group(2)), "scheme": p.scheme, "host": host, "port": port,
             "path": p.path.rstrip("/") if p.scheme != "scgi" else p.path,
             "user": unquote(p.username or ""), "password": unquote(p.password or ""),
             "apikey": "", "name": ""}
+
+
+def build_client_entry(kind: str, url: str, user: str = "", password: str = "", readonly: bool = False) -> str:
+    """Entrée torrentClients à partir des champs du formulaire (identifiants encodés dans l'URL)."""
+    kind = str(kind or "").strip().lower()
+    url = str(url or "").strip().rstrip("/")
+    if kind not in CLIENT_TYPES:
+        raise ValueError("Type de client inconnu")
+    p = urlsplit(url)
+    if p.username or p.password:
+        raise ValueError("Saisis l'identifiant et le mot de passe dans leurs champs, pas dans l'adresse")
+    if p.scheme not in ("http", "https", "scgi") or not (p.netloc or p.path):
+        raise ValueError(f"Adresse invalide : {url} (attendu : http://hôte:port)")
+    cred = f"{quote(user, safe='')}:{quote(password, safe='')}@" if (user or password) and p.scheme != "scgi" else ""
+    entry = f"{kind}:{'readonly:' if readonly else ''}{p.scheme}://{cred}{p.netloc}{p.path}"
+    parse_client(entry)   # même validation que pour une entrée lue
+    return entry
 
 
 def _hide_password(url: str) -> str:

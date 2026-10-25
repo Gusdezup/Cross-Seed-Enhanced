@@ -269,6 +269,27 @@
       <h2 id="set-clients">Clients torrent</h2>
       <p class="muted" id="clients-intro"></p>
       <div id="clients-list" class="clients-list"></div>
+      <div class="sources" id="client-add-wrap" hidden>
+        <div class="card">
+          <div class="src-head"><span class="name">Ajouter un client</span></div>
+          <div class="meta">Écrit dans torrentClients de config.js (sauvegarde préalable), puis redémarrage de cross-seed. L'adresse est celle que cross-seed utilise ; XSE l'essaie d'abord depuis son propre réseau.</div>
+          <label class="field">Type
+            <select id="ca-type">
+              <option value="qbittorrent">qBittorrent</option><option value="rtorrent">rTorrent</option>
+              <option value="transmission">Transmission</option><option value="deluge">Deluge</option>
+            </select></label>
+          <label class="field">Adresse<input type="text" id="ca-url" autocomplete="off"></label>
+          <label class="field">Identifiant<input type="text" id="ca-user" autocomplete="off"></label>
+          <label class="field">Mot de passe<input type="password" id="ca-pass" autocomplete="new-password"></label>
+          <label class="check"><input type="checkbox" id="ca-ro"> Lecture seule pour cross-seed (il y cherche sans y injecter)</label>
+          <div class="src-test" style="margin-top:10px">
+            <button class="small ghost" id="ca-test">Tester</button>
+            <button class="small primary" id="ca-add">Ajouter à config.js</button>
+            <span id="ca-result"></span>
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="clients-restart" hidden>Redémarrer cross-seed pour appliquer</button>
 
       <h2>Noms des trackers</h2>
       <p class="muted">Nom affiché pour chaque tracker détecté dans les clients torrent. Laisse vide pour garder le nom automatique : celui de l'indexer Prowlarr ou Jackett du même site s'il existe, sinon le domaine.</p>

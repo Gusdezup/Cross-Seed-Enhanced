@@ -247,3 +247,71 @@ def test_status_never_exposes_credentials(tmp_path):
     write_config(tmp_path, 'torrentClients: ["qbittorrent:http://admin:topsecret@h:8081"],')
     out = asyncio.run(tc.status())
     assert "topsecret" not in json.dumps(out) and "admin" not in json.dumps(out)
+
+
+# --- ajout et retrait dans config.js ---------------------------------------------
+
+def test_build_client_entry_encodes_credentials():
+    e = config.build_client_entry("qbittorrent", "http://192.168.1.20:8083/", "gus", "p@ss:w", readonly=True)
+    assert e == "qbittorrent:readonly:http://gus:p%40ss%3Aw@192.168.1.20:8083"
+    c = config.parse_client(e)
+    assert (c["readonly"], c["password"]) == (True, "p@ss:w")
+    with pytest.raises(ValueError, match="leurs champs"):
+        config.build_client_entry("qbittorrent", "http://a:b@h:1")
+    with pytest.raises(ValueError):
+        config.build_client_entry("utorrent", "http://h:1")
+
+
+def test_add_and_remove_torrent_client(tmp_path):
+    write_config(tmp_path, """    /**
+     * torrentClients: ["qbittorrent:http://username:password@localhost:8080"]
+     */
+    torrentClients: ["qbittorrent:http://gus:pw@192.168.1.20:8081"],
+    useClientTorrents: true,""")
+    r = xsdb.add_torrent_client("qbittorrent:http://gus:pw@192.168.1.20:8082")
+    assert r["changed"] and r["backup"]
+    text = (tmp_path / "config.js").read_text()
+    assert 'username:password@localhost:8080"]' in text   # commentaire intact
+    assert '      "qbittorrent:http://gus:pw@192.168.1.20:8082",\n    ],\n    useClientTorrents' in text
+    assert xsdb.torrent_client_entries() == ["qbittorrent:http://gus:pw@192.168.1.20:8081",
+                                            "qbittorrent:http://gus:pw@192.168.1.20:8082"]
+    assert xsdb.add_torrent_client("qbittorrent:readonly:http://autre:x@192.168.1.20:8082")["changed"] is False
+    xsdb.remove_torrent_client("qbittorrent:192.168.1.20:8081")
+    assert xsdb.torrent_client_entries() == ["qbittorrent:http://gus:pw@192.168.1.20:8082"]
+    with pytest.raises(ValueError, match="dernier"):
+        xsdb.remove_torrent_client("qbittorrent:192.168.1.20:8082")
+    with pytest.raises(ValueError, match="absent"):
+        xsdb.remove_torrent_client("qbittorrent:inconnu:1")
+
+
+def test_add_keeps_commented_entries_and_refuses_v7(tmp_path):
+    write_config(tmp_path, """    torrentClients: [
+      "qbittorrent:http://h:8081", // principal
+      // "deluge:http://:pw@h:8112/json",
+    ],""")
+    xsdb.add_torrent_client("rtorrent:http://h/RPC2")
+    text = (tmp_path / "config.js").read_text()
+    assert '// "deluge:http://:pw@h:8112/json",' in text
+    assert xsdb.torrent_client_entries() == ["qbittorrent:http://h:8081", "rtorrent:http://h/RPC2"]
+    config.XS_VERSION = "7"
+    with pytest.raises(ValueError, match="v7"):
+        xsdb.add_torrent_client("deluge:http://:pw@h:8112/json")
+
+
+def test_add_endpoint_tests_first(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from app import main
+    write_config(tmp_path, 'torrentClients: ["qbittorrent:http://h:8081"],')
+
+    async def failing(entry):
+        return {"ok": False, "error": "connexion impossible", "url": "http://h:8082"}
+    monkeypatch.setattr(tc, "test", failing)
+    body = {"type": "qbittorrent", "url": "http://h:8082", "user": "gus", "password": "pw"}
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(main.client_add(body))
+    assert e.value.status_code == 409 and len(xsdb.torrent_client_entries()) == 1
+    assert asyncio.run(main.client_add({**body, "force": True}))["changed"]
+    assert xsdb.torrent_client_entries()[-1] == "qbittorrent:http://gus:pw@h:8082"
+    # identifiant de retrait : l'adresse telle qu'écrite chez cross-seed, même si XSE la réécrit
+    conf = tc.configured()
+    assert [c["raw_id"] for c in conf["clients"]] == ["qbittorrent:h:8081", "qbittorrent:h:8082"]

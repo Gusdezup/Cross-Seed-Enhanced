@@ -315,12 +315,24 @@ _LOCAL = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 _conf_cache = {"ts": 0.0, "data": None}
 
 
-def _from_cross_seed() -> tuple:
-    """(clients, entrées ignorées) lus dans la config de cross-seed, adaptés au réseau de XSE :
+def adapt(c: dict) -> dict:
+    """Adresse d'un client lu chez cross-seed, vue depuis XSE :
     - le qBittorrent du port de QBT_URL prend l'adresse et la clé API de QBT_URL (ce qui marchait déjà) ;
     - localhost devient TORRENT_CLIENT_HOST, à défaut l'hôte de QBT_URL (cross-seed dans le réseau
       d'un autre conteneur, Gluetun par exemple)."""
+    c = dict(c)
     legacy = config.legacy_client() if config.QBT_URL_SET else None
+    if legacy and c["type"] == "qbittorrent" and c["port"] == legacy["port"] \
+            and (c["host"] in _LOCAL or c["host"] == legacy["host"]):
+        c.update(scheme=legacy["scheme"], host=legacy["host"], path=legacy["path"], apikey=legacy["apikey"])
+    elif c["host"] in _LOCAL and (config.CLIENT_HOST or legacy):
+        c["host"] = config.CLIENT_HOST or legacy["host"]
+    return c
+
+
+def _from_cross_seed() -> tuple:
+    """(clients, entrées ignorées) lus dans la config de cross-seed, adaptés au réseau de XSE.
+    raw_id : identifiant tel qu'écrit chez cross-seed (pour retirer le client de config.js)."""
     out, bad = [], []
     for entry in xsdb.torrent_client_entries():
         try:
@@ -328,12 +340,9 @@ def _from_cross_seed() -> tuple:
         except ValueError as e:
             bad.append(str(e))
             continue
-        if legacy and c["type"] == "qbittorrent" and c["port"] == legacy["port"] \
-                and (c["host"] in _LOCAL or c["host"] == legacy["host"]):
-            c.update(scheme=legacy["scheme"], host=legacy["host"], path=legacy["path"],
-                     apikey=legacy["apikey"])
-        elif c["host"] in _LOCAL and (config.CLIENT_HOST or legacy):
-            c["host"] = config.CLIENT_HOST or legacy["host"]
+        raw = config.client_id(c)
+        c = adapt(c)
+        c.update(raw_id=raw, source="cross-seed")
         out.append(c)
     return out, bad
 
@@ -345,12 +354,12 @@ def configured() -> dict:
         return _conf_cache["data"]
     ignored = []
     if config.ENV_CLIENTS:
-        specs, origin = [dict(c) for c in config.ENV_CLIENTS], ".env (TORRENT_CLIENT_N)"
+        specs, origin = [dict(c, source="env") for c in config.ENV_CLIENTS], ".env (TORRENT_CLIENT_N)"
     else:
         specs, ignored = _from_cross_seed()
         origin = "config de cross-seed (torrentClients)"
         if not specs:
-            specs, origin = [config.legacy_client()], ".env (QBT_URL)"
+            specs, origin = [dict(config.legacy_client(), source="legacy")], ".env (QBT_URL)"
     seen, uniq = set(), []
     for c in specs:   # un même client déclaré deux fois n'est lu qu'une fois
         c["id"] = config.client_id(c)
@@ -497,4 +506,26 @@ async def status() -> dict:
         "torrents": len((_state.get(c["id"]) or {}).get("data") or []),
         "default_name": default_name(c, specs), "custom_name": custom.get(c["id"], ""),
         "env_name": env_names.get(c["id"], ""),
-    } for c, v in zip(specs, versions)]}
+        "readonly": bool(c.get("readonly")), "source": c.get("source", ""), "raw_id": c.get("raw_id", ""),
+    } for c, v in zip(specs, versions)], "editable": editable()}
+
+
+def editable() -> bool:
+    """Clients modifiables depuis l'interface : torrentClients de config.js (v6), écriture permise."""
+    return config.XS_VERSION == "6" and (not config.READONLY or config.ALLOW_CONFIG_WRITE)
+
+
+async def test(entry: str) -> dict:
+    """Essaie un client avant de l'écrire dans config.js : version et nombre de torrents, vus depuis XSE."""
+    c = adapt(config.parse_client(entry))
+    c["id"] = config.client_id(c)
+    inst = ADAPTERS[c["type"]](c)
+    try:
+        version = await asyncio.wait_for(inst.version(), 15)
+        count = len(await asyncio.wait_for(inst.torrents(), 60))
+        return {"ok": True, "version": version, "torrents": count, "url": config.client_url(c)}
+    except Exception as e:  # noqa: BLE001
+        msg = "délai dépassé" if isinstance(e, asyncio.TimeoutError) else _err(e)
+        return {"ok": False, "error": msg, "url": config.client_url(c)}
+    finally:
+        await inst.http.aclose()
