@@ -12,6 +12,8 @@ Clients configurés, par ordre de priorité :
 """
 import asyncio
 import time
+import xmlrpc.client
+from urllib.parse import unquote
 
 import httpx
 
@@ -88,7 +90,223 @@ class QBittorrent(Client):
         return (await self._get("/api/v2/app/version", timeout=8)).text.strip()
 
 
-ADAPTERS = {"qbittorrent": QBittorrent}
+def _qstate(done: bool, kind: str) -> str:
+    """État au format qBittorrent 5 : suffixe UP (terminé) ou DL (en cours)."""
+    return f"{kind}{'UP' if done else 'DL'}"
+
+
+# --- rTorrent ----------------------------------------------------------------------
+
+class RTorrent(Client):
+    """XML-RPC sur HTTP (/RPC2, httprpc de ruTorrent ; Basic ou Digest) ou SCGI direct
+    (scgi://hôte:port, scgi:///chemin/du/socket, sans authentification)."""
+    kind = "rtorrent"
+    FIELDS = ("d.hash=", "d.name=", "d.size_bytes=", "d.completed_bytes=", "d.custom1=", "d.directory=",
+              "d.is_multi_file=", "d.state=", "d.is_active=", "d.complete=", "d.hashing=", "d.custom=addtime")
+
+    def __init__(self, spec: dict, transport=None):
+        super().__init__(spec, transport)
+        self.auth = httpx.BasicAuth(spec["user"], spec["password"]) if spec["user"] else None
+
+    async def _http_call(self, body: bytes) -> bytes:
+        headers = {"Content-Type": "text/xml"}
+        r = await self.http.post(self.url, content=body, headers=headers, auth=self.auth)
+        if r.status_code == 401 and self.spec["user"] \
+                and r.headers.get("www-authenticate", "").lower().startswith("digest") \
+                and not isinstance(self.auth, httpx.DigestAuth):
+            self.auth = httpx.DigestAuth(self.spec["user"], self.spec["password"])
+            r = await self.http.post(self.url, content=body, headers=headers, auth=self.auth)
+        if r.status_code == 401:
+            raise RuntimeError("authentification refusée par rTorrent")
+        r.raise_for_status()
+        return r.content
+
+    async def _scgi_call(self, body: bytes) -> bytes:
+        s = self.spec
+        if s["host"]:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(s["host"], s["port"] or 5000), 10)
+        else:
+            reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(s["path"]), 10)
+        try:
+            head = b"CONTENT_LENGTH\x00%d\x00SCGI\x001\x00REQUEST_METHOD\x00POST\x00REQUEST_URI\x00/RPC2\x00" % len(body)
+            writer.write(b"%d:%s," % (len(head), head) + body)
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(), 60)
+        finally:
+            writer.close()
+        for sep in (b"\r\n\r\n", b"\n\n"):   # en-têtes de type CGI avant le XML
+            if sep in data and not data.lstrip().startswith(b"<?xml"):
+                return data.split(sep, 1)[1]
+        return data
+
+    async def call(self, method: str, *params):
+        body = xmlrpc.client.dumps(params, method).encode()
+        raw = await (self._scgi_call(body) if self.spec["scheme"] == "scgi" else self._http_call(body))
+        try:
+            return xmlrpc.client.loads(raw, use_builtin_types=True)[0][0]
+        except xmlrpc.client.Fault as e:
+            raise RuntimeError(f"rTorrent : {e.faultString}") from e
+        except Exception as e:  # noqa: BLE001  réponse qui n'est pas du XML-RPC
+            raise RuntimeError("réponse XML-RPC illisible (adresse du point d'entrée ?)") from e
+
+    async def torrents(self) -> list:
+        rows = await self.call("d.multicall2", "", "main", *self.FIELDS)
+        calls = [{"methodName": "t.multicall", "params": [r[0], "", "t.url="]} for r in rows]
+        trs = await self.call("system.multicall", calls) if calls else []
+        out = []
+        for row, tr in zip(rows, trs):
+            h, name, size, done_b, label, directory, multi, started, active, complete, hashing, addtime = row
+            urls = [u[0] for u in (tr[0] if isinstance(tr, list) and tr else []) if u and u[0]]
+            done = bool(complete)
+            if hashing:
+                state = _qstate(done, "checking")
+            elif not started:
+                state = _qstate(done, "stopped")
+            elif not active:
+                state = _qstate(done, "paused")
+            else:
+                state = "uploading" if done else "downloading"
+            out.append({
+                "hash": h.lower(), "name": name, "size": size, "total_size": size,
+                "progress": 1.0 if done else (done_b / size if size else 0.0),
+                # étiquette ruTorrent, encodée en URL dans custom1
+                "category": unquote(label or ""), "tags": "",
+                "tracker": next((u for u in urls if not u.startswith("dht://")), ""),
+                "content_path": directory if multi else f"{directory.rstrip('/')}/{name}",
+                "state": state, "added_on": int(addtime) if str(addtime).strip().isdigit() else 0,
+            })
+        return out
+
+    async def version(self) -> str:
+        return str(await self.call("system.client_version"))
+
+
+# --- Transmission ------------------------------------------------------------------
+
+class Transmission(Client):
+    """RPC JSON (/transmission/rpc) : Basic, et jeton X-Transmission-Session-Id (relance sur 409)."""
+    kind = "transmission"
+    FIELDS = ["hashString", "name", "totalSize", "sizeWhenDone", "percentDone", "labels", "trackers",
+              "downloadDir", "status", "addedDate"]
+    STATES = {0: "stopped", 1: "checking", 2: "checking", 3: "queued", 4: "downloading", 5: "queued",
+              6: "uploading"}
+
+    def __init__(self, spec: dict, transport=None):
+        super().__init__(spec, transport)
+        self.sid = ""
+        self.auth = httpx.BasicAuth(spec["user"], spec["password"]) if spec["user"] or spec["password"] else None
+
+    async def rpc(self, method: str, arguments: dict | None = None, timeout: float = 60) -> dict:
+        for _ in range(2):
+            r = await self.http.post(self.url, json={"method": method, "arguments": arguments or {}},
+                                     headers={"X-Transmission-Session-Id": self.sid}, auth=self.auth,
+                                     timeout=timeout)
+            if r.status_code == 409:   # jeton de session absent ou périmé
+                self.sid = r.headers.get("X-Transmission-Session-Id", "")
+                continue
+            break
+        if r.status_code == 401:
+            raise RuntimeError("authentification refusée par Transmission")
+        r.raise_for_status()
+        body = r.json()
+        if body.get("result") != "success":
+            raise RuntimeError(f"Transmission : {body.get('result')}")
+        return body.get("arguments") or {}
+
+    async def torrents(self) -> list:
+        args = await self.rpc("torrent-get", {"fields": self.FIELDS})
+        out = []
+        for t in args.get("torrents") or []:
+            labels = [str(x) for x in t.get("labels") or []]
+            done = (t.get("percentDone") or 0) >= 1
+            kind = self.STATES.get(t.get("status"), "unknown")
+            out.append({
+                "hash": (t.get("hashString") or "").lower(), "name": t.get("name") or "",
+                "size": t.get("sizeWhenDone") or 0, "total_size": t.get("totalSize") or 0,
+                "progress": t.get("percentDone") or 0,
+                # labels depuis Transmission 4.0 : le premier sert de catégorie
+                "category": labels[0] if labels else "", "tags": ",".join(labels),
+                "tracker": next((x.get("announce") for x in t.get("trackers") or [] if x.get("announce")), ""),
+                "content_path": f"{(t.get('downloadDir') or '').rstrip('/')}/{t.get('name') or ''}",
+                "state": kind if kind in ("uploading", "downloading") else _qstate(done, kind),
+                "added_on": t.get("addedDate") or 0,
+            })
+        return out
+
+    async def version(self) -> str:
+        return str((await self.rpc("session-get", {"fields": ["version"]}, timeout=8)).get("version", ""))
+
+
+# --- Deluge ------------------------------------------------------------------------
+
+class Deluge(Client):
+    """API JSON de la WebUI (/json) : auth.login (mot de passe de l'URL), puis connexion au démon
+    (le premier hôte de la WebUI) si la WebUI n'y est pas déjà connectée. Catégorie : plugin Label."""
+    kind = "deluge"
+    FIELDS = ["name", "total_size", "total_wanted", "progress", "label", "trackers", "save_path", "state",
+              "time_added"]
+    STATES = {"Seeding": "uploading", "Downloading": "downloading", "Paused": "stopped", "Checking": "checking",
+              "Queued": "queued", "Error": "error", "Moving": "moving", "Allocating": "allocating"}
+
+    def __init__(self, spec: dict, transport=None):
+        super().__init__(spec, transport)
+        self.ready, self.n = False, 0
+
+    async def _raw(self, method: str, *params, timeout: float = 60):
+        self.n += 1
+        r = await self.http.post(self.url, json={"method": method, "params": list(params), "id": self.n},
+                                 timeout=timeout)
+        r.raise_for_status()
+        body = r.json()
+        if body.get("error"):
+            raise RuntimeError(f"Deluge : {(body['error'] or {}).get('message') or body['error']}")
+        return body.get("result")
+
+    async def _connect(self) -> None:
+        if not await self._raw("auth.login", self.spec["password"]):
+            raise RuntimeError("mot de passe refusé par Deluge")
+        if not await self._raw("web.connected"):
+            hosts = await self._raw("web.get_hosts") or []
+            if not hosts:
+                raise RuntimeError("aucun démon Deluge déclaré dans la WebUI")
+            await self._raw("web.connect", hosts[0][0])
+            if not await self._raw("web.connected"):
+                raise RuntimeError("la WebUI Deluge n'arrive pas à se connecter au démon")
+        self.ready = True
+
+    async def call(self, method: str, *params, timeout: float = 60):
+        if not self.ready:
+            await self._connect()
+        try:
+            return await self._raw(method, *params, timeout=timeout)
+        except RuntimeError:   # session expirée ou démon déconnecté : on se reconnecte une fois
+            self.ready = False
+            await self._connect()
+            return await self._raw(method, *params, timeout=timeout)
+
+    async def torrents(self) -> list:
+        data = await self.call("core.get_torrents_status", {}, self.FIELDS) or {}
+        out = []
+        for h, t in data.items():
+            progress = (t.get("progress") or 0) / 100
+            done = progress >= 1
+            kind = self.STATES.get(t.get("state"), "unknown")
+            out.append({
+                "hash": h.lower(), "name": t.get("name") or "",
+                "size": t.get("total_wanted") or t.get("total_size") or 0, "total_size": t.get("total_size") or 0,
+                "progress": progress, "category": t.get("label") or "", "tags": "",
+                "tracker": next((x.get("url") for x in t.get("trackers") or [] if x.get("url")), ""),
+                "content_path": f"{(t.get('save_path') or '').rstrip('/')}/{t.get('name') or ''}",
+                "state": kind if kind in ("uploading", "downloading", "error") else _qstate(done, kind),
+                "added_on": int(t.get("time_added") or 0),
+            })
+        return out
+
+    async def version(self) -> str:
+        return str(await self.call("daemon.info", timeout=8))
+
+
+ADAPTERS = {"qbittorrent": QBittorrent, "rtorrent": RTorrent, "transmission": Transmission, "deluge": Deluge}
 
 
 # --- clients configurés ------------------------------------------------------------
