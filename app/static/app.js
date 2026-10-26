@@ -153,7 +153,7 @@ async function loadHealth() {
     state.clientsOrigin = s.clients_origin || "";
     state.clientsIgnored = s.clients_ignored || [];
     state.clientsEditable = !!s.clients_editable;
-    if (state.tab === "settings") renderClients();
+    if (state.tab === "settings") { renderClients(); if (state.settings) renderGroups(); }
     if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
       x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
       x.lastChild.textContent = s.xs.ok ? `cross-seed v${state.xsVersion} en ligne` : `cross-seed v${state.xsVersion} injoignable`;
@@ -1435,7 +1435,9 @@ function renderGroups() {
         Toutes les autres catégories${othersOwner && !g.others ? ` (déjà le groupe ${esc(othersOwner.name)})` : " (celles rangées dans aucun groupe, y compris les nouvelles)"}</label>
       ${clients.length > 1 || g.clients.length ? `<div class="group-row"><span class="group-lbl">Clients</span><div class="picks">${clients.map((c) => {
         const on = g.clients.includes(c.id);
-        return `<label class="pick${on ? " on" : ""}"><input type="checkbox" data-client-id="${esc(c.id)}" ${on ? "checked" : ""}>${esc(c.name)}</label>`;
+        // version lue dans l'état des clients (pastilles de l'en-tête)
+        const v = ((state.clients || []).find((x) => x.id === c.id) || {}).version;
+        return `<label class="pick${on ? " on" : ""}"><input type="checkbox" data-client-id="${esc(c.id)}" ${on ? "checked" : ""}>${esc(c.name)}${v ? ` <small>${esc(v)}</small>` : ""}</label>`;
       }).join("")}${g.clients.filter((id) => !clients.some((c) => c.id === id)).map((id) =>
         `<label class="pick on taken" title="Client absent de la configuration : ignoré"><input type="checkbox" data-client-id="${esc(id)}" checked>${esc(id)} <small>(absent)</small></label>`).join("")}
         <span class="muted">${g.clients.length ? "" : "aucun coché : tous les clients"}</span></div></div>` : ""}
