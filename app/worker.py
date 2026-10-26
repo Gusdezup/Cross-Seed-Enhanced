@@ -122,6 +122,7 @@ class SearchQueue:
             "id": next(_ids), "key": release["key"], "name": release["name"],
             "payload": release["payload"], "mode": release["mode"], "source": source,
             "category": release.get("category", ""), "size": release.get("size", 0),
+            "clients": release.get("client_ids"),
             "skip": release.get("seeded_keys", []), "targets": targets, "batch": batch, "front": front,
             "status": "pending", "added": time.time(), "sent": None, "done": None,
             "result": None, "error": None,
@@ -261,7 +262,7 @@ class SearchQueue:
             await self._send(item)
 
     async def _send(self, item: dict):
-        route = item.get("targets") or routing.route_for(item.get("category", ""))
+        route = item.get("targets") or routing.route_for(item.get("category", ""), item.get("clients"))
         if route:
             await self._send_routed(item, route)
             return

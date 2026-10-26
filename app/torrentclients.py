@@ -443,23 +443,27 @@ async def _fetch(c: dict, force: bool) -> dict:
 
 
 def merge(results: list) -> list:
-    """Fusionne [(nom du client, torrents)] dans l'ordre des clients. Un hash présent dans plusieurs
-    clients n'apparaît qu'une fois : l'enregistrement le plus avancé, à défaut celui du premier client."""
+    """Fusionne [(nom du client, torrents[, identifiant du client])] dans l'ordre des clients. Un hash
+    présent dans plusieurs clients n'apparaît qu'une fois : l'enregistrement le plus avancé, à défaut
+    celui du premier client. client_ids : identifiants de tous les clients où il est présent."""
     by, order = {}, []
-    for name, data in results:
+    for res in results:
+        name, data = res[0], res[1]
+        cid = res[2] if len(res) > 2 else name
         for t in data:
             h = (t.get("hash") or "").lower()
             if not h:
                 continue
             cur = by.get(h)
             if cur is None:
-                by[h] = {**t, "hash": h, "client": name, "clients": [name]}
+                by[h] = {**t, "hash": h, "client": name, "clients": [name], "client_ids": [cid]}
                 order.append(h)
                 continue
             if name not in cur["clients"]:
                 cur["clients"].append(name)
+                cur["client_ids"].append(cid)
             if (t.get("progress") or 0) > (cur.get("progress") or 0):
-                by[h] = {**t, "hash": h, "client": name, "clients": cur["clients"]}
+                by[h] = {**t, "hash": h, "client": name, "clients": cur["clients"], "client_ids": cur["client_ids"]}
     return [by[h] for h in order]
 
 
@@ -472,7 +476,7 @@ async def snapshot(force: bool = False) -> dict:
              "error": st["error"], "torrents": len(st["data"])} for c, st in zip(specs, states)]
     if specs and not any(i["ok"] for i in info):
         raise Unavailable(" ; ".join(f"{i['name']} : {i['error']}" for i in info))
-    return {"torrents": merge([(c["name"], st["data"]) for c, st in zip(specs, states)]), "clients": info}
+    return {"torrents": merge([(c["name"], st["data"], c["id"]) for c, st in zip(specs, states)]), "clients": info}
 
 
 async def all_torrents(force: bool = False) -> list:

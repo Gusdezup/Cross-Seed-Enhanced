@@ -256,10 +256,10 @@ def plausible(cands: list, size: int) -> list:
 
 # --- routes -----------------------------------------------------------------------------------------
 
-def route_for(category: str) -> list:
+def route_for(category: str, clients=None) -> list:
     """Clés des indexers (URL Torznab normalisée) du groupe de cette catégorie, ou [] : catégorie rangée
     dans aucun groupe (ou groupe sans indexer), recherche normale par cross-seed sur tous ses indexers."""
-    g = config.group_for(category, config.load_settings()["groups"])
+    g = config.group_for(category, config.load_settings()["groups"], clients)
     return g["indexers"] if g else []
 
 

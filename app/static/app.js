@@ -239,7 +239,7 @@ async function loadReleases(refresh = false) {
 // Releases correspondant aux critères de l'étape 1 (mêmes règles que demandes.py côté serveur)
 function matchesSearch(r) {
   if (search.groups.length || search.categories.length) {
-    const g = search.groups.length ? groupFor(r.category, (state.settings && state.settings.groups) || []) : null;
+    const g = search.groups.length ? groupFor(r.category, (state.settings && state.settings.groups) || [], r.client_ids) : null;
     if (!has(search.categories, r.category || "") && !(g && has(search.groups, g.name))) return false;
   }
   const terms = search.text.toLowerCase().split(/\s+/).filter(Boolean);
@@ -350,7 +350,8 @@ function detailRow(r) {
       <td>${copies || ""}</td>
     </tr>`;
   }).join("");
-  const target = r.mode === "hash" ? `hash ${r.payload.infoHash.slice(0, 10)}…` : r.payload.path;
+  const target = r.payload.path || `hash ${r.payload.infoHash.slice(0, 10)}…` +
+    (r.mode === "hash" ? "" : " (copie cross-seed : injection dans le client de cette copie)");
   return `<tr class="detail" data-detail="${esc(r.key)}"><td></td><td colspan="98">
     <h4>État par tracker</h4>
     <table class="mini"><tr><th>Tracker</th><th>État</th><th>Dernière recherche</th><th>Copie dans le client</th></tr>${rows}</table>
@@ -778,7 +779,7 @@ function renderSearch() {
   if (groups.length) {
     html += `<span class="chips-sep">Groupes</span>`;
     html += groups.map((g) => chipBtn(`data-group="${esc(g.name)}"`,
-      `${esc(g.name)} <small>${scopeCount((r) => groupFor(r.category, groups) === g)}</small>`, has(search.groups, g.name), " grp")).join("");
+      `${esc(g.name)} <small>${scopeCount((r) => groupFor(r.category, groups, r.client_ids) === g)}</small>`, has(search.groups, g.name), " grp")).join("");
   }
   html += `<span class="chips-sep">Catégories</span>`;
   html += knownCategories().map((c) => chipBtn(`data-cat="${esc(c)}"`,
@@ -1360,11 +1361,16 @@ function renderRules() {
 // ---------- groupes de trackers ----------
 const lc = (x) => String(x ?? "").trim().toLowerCase();
 const catName = (c) => (c ? c : "sans catégorie");
-// Même règle que config.group_for côté serveur
-function groupFor(category, groups) {
+// Même règle que config.group_for côté serveur : clientIds = clients de la release (undefined : la
+// catégorie seule compte) ; un groupe sans client vise tous les clients.
+const groupApplies = (g, clientIds) => !(g.clients || []).length || !clientIds || clientIds.some((c) => g.clients.includes(c));
+function groupFor(category, groups, clientIds) {
   const c = lc(category);
-  return groups.find((g) => g.categories.some((x) => lc(x) === c)) || groups.find((g) => g.others) || null;
+  return groups.find((g) => groupApplies(g, clientIds) && g.categories.some((x) => lc(x) === c))
+    || groups.find((g) => g.others && groupApplies(g, clientIds)) || null;
 }
+// Deux groupes visent-ils un même client ?
+const groupsOverlap = (a, b) => !(a.clients || []).length || !(b.clients || []).length || a.clients.some((c) => b.clients.includes(c));
 function knownCategories() {
   const set = new Map();
   for (const r of state.releases) set.set(lc(r.category), r.category || "");
@@ -1386,7 +1392,7 @@ function indexerLabel(k) {
 }
 function groupInfoHtml(g) {
   const groups = state.settings.groups;
-  const n = state.releases.filter((r) => groupFor(r.category, groups) === g).length;
+  const n = state.releases.filter((r) => groupFor(r.category, groups, r.client_ids) === g).length;
   const rel = n ? `<span class="res-hit">${n} release${n > 1 ? "s" : ""}</span>` : `<span class="res-warn">Aucune release</span>`;
   const idx = g.indexers.length ? `cherchée${n > 1 ? "s" : ""} sur ${g.indexers.length} tracker${g.indexers.length > 1 ? "s" : ""}`
     : `<span class="res-warn">aucun tracker coché : recherche par cross-seed sur tous ses indexers</span>`;
@@ -1397,10 +1403,15 @@ function renderGroups() {
   const idx = activeIndexers();
   if (!idx.length && !idxData) { $("#groups").innerHTML = `<p class="muted">Chargement des indexers…</p>`; loadIndexers().then(() => renderGroups()); return; }
   const cats = knownCategories();
-  const othersOwner = groups.find((g) => g.others);
+  const clients = state.relClients.length ? state.relClients : state.clients;
   $("#groups").innerHTML = groups.map((g, n) => {
+    g.clients = g.clients || [];
+    // une catégorie ou « les autres » ne peut être qu'à un groupe parmi ceux qui visent un même client
+    const before = groups.slice(0, n).filter((x) => groupsOverlap(x, g));
+    const others = groups.filter((x) => x !== g && groupsOverlap(x, g));
+    const othersOwner = others.find((x) => x.others);
     const catBoxes = cats.map((c) => {
-      const owner = groups.find((x) => x !== g && x.categories.some((y) => lc(y) === lc(c)));
+      const owner = (g.categories.some((y) => lc(y) === lc(c)) ? before : others).find((x) => x.categories.some((y) => lc(y) === lc(c)));
       const on = g.categories.some((y) => lc(y) === lc(c));
       return `<label class="pick${on ? " on" : ""}${owner ? " taken" : ""}"${owner ? ` title="Déjà dans le groupe ${esc(owner.name)}"` : ""}>
         <input type="checkbox" data-cat="${esc(c)}" ${on ? "checked" : ""} ${owner ? "disabled" : ""}>${esc(catName(c))}${owner ? ` <small>(${esc(owner.name)})</small>` : ""}</label>`;
@@ -1420,8 +1431,14 @@ function renderGroups() {
       </div>
       <div class="group-row"><span class="group-lbl">Catégories</span><div class="picks">${catBoxes}
         <input type="text" class="cat-add" data-f="newcat" list="rule-cats" placeholder="autre catégorie…" aria-label="Ajouter une catégorie"></div></div>
-      <label class="check others"><input type="checkbox" data-f="others" ${g.others ? "checked" : ""} ${othersOwner && othersOwner !== g ? "disabled" : ""}>
-        Toutes les autres catégories${othersOwner && othersOwner !== g ? ` (déjà le groupe ${esc(othersOwner.name)})` : " (celles rangées dans aucun groupe, y compris les nouvelles)"}</label>
+      <label class="check others"><input type="checkbox" data-f="others" ${g.others ? "checked" : ""} ${othersOwner && !g.others ? "disabled" : ""}>
+        Toutes les autres catégories${othersOwner && !g.others ? ` (déjà le groupe ${esc(othersOwner.name)})` : " (celles rangées dans aucun groupe, y compris les nouvelles)"}</label>
+      ${clients.length > 1 || g.clients.length ? `<div class="group-row"><span class="group-lbl">Clients</span><div class="picks">${clients.map((c) => {
+        const on = g.clients.includes(c.id);
+        return `<label class="pick${on ? " on" : ""}"><input type="checkbox" data-client-id="${esc(c.id)}" ${on ? "checked" : ""}>${esc(c.name)}</label>`;
+      }).join("")}${g.clients.filter((id) => !clients.some((c) => c.id === id)).map((id) =>
+        `<label class="pick on taken" title="Client absent de la configuration : ignoré"><input type="checkbox" data-client-id="${esc(id)}" checked>${esc(id)} <small>(absent)</small></label>`).join("")}
+        <span class="muted">${g.clients.length ? "" : "aucun coché : tous les clients"}</span></div></div>` : ""}
       <div class="group-row"><span class="group-lbl">Trackers</span><div class="picks">${idxBoxes || `<span class="muted">Aucun indexer actif dans config.js</span>`}</div></div>
       <div class="rule-info">${groupInfoHtml(g)}</div>
     </div>`;
@@ -1443,11 +1460,14 @@ $("#groups").addEventListener("change", (e) => {
   } else if (e.target.dataset.key) {
     const k = e.target.dataset.key;
     g.indexers = e.target.checked ? [...new Set([...g.indexers, k])] : g.indexers.filter((x) => x !== k);
+  } else if (e.target.dataset.clientId) {
+    const id = e.target.dataset.clientId;
+    g.clients = e.target.checked ? [...new Set([...(g.clients || []), id])] : (g.clients || []).filter((x) => x !== id);
   } else if (e.target.dataset.f === "others") {
     g.others = e.target.checked;
   } else if (e.target.dataset.f === "newcat") {
     const c = e.target.value.trim();
-    const taken = state.settings.groups.some((x) => x.categories.some((y) => lc(y) === lc(c)));
+    const taken = state.settings.groups.some((x) => x !== g && groupsOverlap(x, g) && x.categories.some((y) => lc(y) === lc(c)));
     if (c && !taken) g.categories.push(c);
     else if (taken) toast(`La catégorie ${c} est déjà dans un groupe`, true);
   } else return;

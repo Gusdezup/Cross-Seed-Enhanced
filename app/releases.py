@@ -94,7 +94,11 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
         if orig:
             payload = {"infoHash": orig["hash"]}
         else:
-            payload = {"path": ref.get("content_path") or ""}
+            # Que des cross-seeds : on cherche à partir de l'un d'eux (ignoreCrossSeeds=false, sinon
+            # cross-seed l'écarte). Avec un hash, cross-seed injecte dans le client de ce torrent ; avec
+            # le chemin, ce serait une recherche par les données, injectée dans le premier client.
+            first = min(ts, key=lambda t: t.get("added_on") or 0)
+            payload = {"infoHash": first["hash"], "ignoreCrossSeeds": "false"}
         copies = []
         for t in ts:
             host = tracker_host(t)
@@ -110,6 +114,7 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
                 "added_on": t.get("added_on") or 0,
                 "client": t.get("client") or "",
                 "clients": t.get("clients") or [],
+                "client_ids": t.get("client_ids") or [],
             })
         copies.sort(key=lambda c: (c["cross_seed"], c["added_on"]))
         category = release_category(orig, ts)
@@ -129,6 +134,7 @@ def build(torrents: list, settings: dict, site_names: dict | None = None) -> lis
             "category": category,
             # clients torrent où la release est présente (une copie peut être dans plusieurs)
             "clients": list(dict.fromkeys(n for c in copies for n in c["clients"])),
+            "client_ids": list(dict.fromkeys(i for c in copies for i in c["client_ids"])),
             "last_search": None,
             "trackers": [],
             "seeds": len({c["tracker"] for c in copies}),

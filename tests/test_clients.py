@@ -350,3 +350,39 @@ def test_data_dirs_edit_keeps_notes_and_comments(tmp_path):
         xsdb.update_data_dir("media/x", "add")
     # données injectées dans le premier client hors lecture seule
     assert tc.inject_target() == "qBittorrent :8081"
+
+
+# --- groupes par client et recherche à partir d'une copie --------------------------
+
+def test_groups_scoped_by_client():
+    """« cross-seed » existe dans les deux clients : un groupe par client, la même catégorie dans chacun."""
+    groups = config.clean_groups([
+        {"name": "Vidéo", "categories": ["radarr", "cross-seed"], "clients": ["qbittorrent:h:8081"], "indexers": ["v"]},
+        {"name": "Musique", "categories": ["musique", "cross-seed"], "clients": ["qbittorrent:h:8082"], "indexers": ["m"]},
+        {"name": "Tous", "categories": ["cross-seed", "ebook"], "indexers": []},   # chevauche les deux
+    ])
+    assert [g["categories"] for g in groups] == [["radarr", "cross-seed"], ["musique", "cross-seed"], ["ebook"]]
+    assert config.group_for("cross-seed", groups, ["qbittorrent:h:8082"])["name"] == "Musique"
+    assert config.group_for("cross-seed", groups, ["qbittorrent:h:8081"])["name"] == "Vidéo"
+    assert config.group_for("cross-seed", groups)["name"] == "Vidéo"   # client inconnu : catégorie seule
+    assert config.group_for("ebook", groups, ["qbittorrent:h:8082"])["name"] == "Tous"
+    # sans « clients » : comportement d'avant, une catégorie dans un seul groupe
+    old = config.clean_groups([{"name": "A", "categories": ["x"]}, {"name": "B", "categories": ["x"], "others": True}])
+    assert old[1]["categories"] == [] and old[1]["others"] and old[0]["clients"] == []
+    two_others = config.clean_groups([{"name": "A", "others": True, "clients": ["c1"]},
+                                      {"name": "B", "others": True, "clients": ["c2"]}])
+    assert [g["others"] for g in two_others] == [True, True]
+
+
+def test_release_without_original_searches_from_a_copy():
+    torrents = tc.merge([
+        ("principal", [tor("aa", category="radarr")], "qbittorrent:h:8081"),
+        ("musique", [tor("bb", name="Album", category="cross-seed", tags="cross-seed", added_on=5),
+                     tor("cc", name="Album", category="cross-seed", tags="cross-seed", added_on=2)], "qbittorrent:h:8082"),
+    ])
+    items = {r["name"]: r for r in releases.build(torrents, {"rules": [], "tracker_aliases": {}})}
+    assert items["Film.2024.1080p"]["payload"] == {"infoHash": "aa"}
+    album = items["Album"]
+    assert album["mode"] == "path" and not album["has_original"]
+    assert album["payload"] == {"infoHash": "cc", "ignoreCrossSeeds": "false"}   # la copie la plus ancienne
+    assert album["client_ids"] == ["qbittorrent:h:8082"]

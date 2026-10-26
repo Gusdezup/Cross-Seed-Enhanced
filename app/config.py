@@ -263,10 +263,16 @@ def groups_from_routes(routes) -> list:
     return out
 
 
+def _overlap(a: list, b: list) -> bool:
+    """Deux groupes visent-ils un même client ? Liste vide : tous les clients."""
+    return not a or not b or bool(set(a) & set(b))
+
+
 def clean_groups(groups) -> list:
-    """Groupes valides : un nom unique ; une catégorie n'appartient qu'à un seul groupe (le premier) ;
-    un seul groupe « toutes les autres catégories ». Majuscules et minuscules confondues."""
-    out, names, cats, others = [], set(), set(), False
+    """Groupes valides : un nom unique ; une catégorie n'appartient qu'à un seul groupe (le premier)
+    parmi ceux qui visent un même client ; un seul groupe « toutes les autres catégories » par client.
+    "clients" : identifiants des clients torrent du groupe (vide : tous). Majuscules et minuscules confondues."""
+    out, names = [], set()
     for g in groups if isinstance(groups, list) else []:
         if not isinstance(g, dict):
             continue
@@ -274,26 +280,34 @@ def clean_groups(groups) -> list:
         if not name or name.lower() in names:
             continue
         names.add(name.lower())
+        cl = list(dict.fromkeys(str(c).strip() for c in g.get("clients") or [] if str(c).strip()))
+        rivals = [o for o in out if _overlap(o["clients"], cl)]
+        taken = {c.lower() for o in rivals for c in o["categories"]}
         mine = []
         for c in g.get("categories") or []:
             c = str(c).strip()
-            if c.lower() not in cats:   # "" (sans catégorie) est une valeur permise
-                cats.add(c.lower())
+            if c.lower() not in taken:   # "" (sans catégorie) est une valeur permise
+                taken.add(c.lower())
                 mine.append(c)
-        oth = bool(g.get("others")) and not others
-        others = others or oth
+        oth = bool(g.get("others")) and not any(o["others"] for o in rivals)
         idx = [str(k).strip() for k in g.get("indexers") or [] if str(k).strip()]
-        out.append({"name": name, "categories": mine, "others": oth, "indexers": list(dict.fromkeys(idx))})
+        out.append({"name": name, "categories": mine, "others": oth, "indexers": list(dict.fromkeys(idx)),
+                    "clients": cl})
     return out
 
 
-def group_for(category: str, groups: list):
-    """Groupe d'une catégorie qBittorrent : celui qui la contient, sinon celui des « autres catégories »."""
+def group_for(category: str, groups: list, clients=None):
+    """Groupe d'une catégorie : celui qui la contient, sinon celui des « autres catégories », parmi les
+    groupes qui visent l'un des clients de la release (clients : identifiants ; None : client inconnu,
+    seule la catégorie compte)."""
     cat = (category or "").strip().lower()
+
+    def applies(g):
+        return not g.get("clients") or clients is None or any(c in g["clients"] for c in clients)
     for g in groups:
-        if any(c.lower() == cat for c in g["categories"]):
+        if applies(g) and any(c.lower() == cat for c in g["categories"]):
             return g
-    return next((g for g in groups if g["others"]), None)
+    return next((g for g in groups if g["others"] and applies(g)), None)
 
 
 def _bounded(v, default: int, lo: int, hi: int) -> int:

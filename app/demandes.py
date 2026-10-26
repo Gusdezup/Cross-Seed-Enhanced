@@ -68,7 +68,7 @@ def _in_scope(r: dict, crit: dict, groups: list) -> bool:
     if any(c.lower() == cat for c in crit["categories"]):
         return True
     if crit["groups"]:
-        g = config.group_for(r.get("category"), groups)
+        g = config.group_for(r.get("category"), groups, r.get("client_ids"))
         return bool(g) and g["name"].lower() in {n.lower() for n in crit["groups"]}
     return False
 
@@ -98,7 +98,7 @@ def targets_for(r: dict, crit: dict, groups: list, active: dict):
     les indexers actifs, pour juger de l'état de la release)."""
     if crit["targets"]:
         return [k for k in crit["targets"] if k in active], "explicit"
-    g = config.group_for(r.get("category"), groups)
+    g = config.group_for(r.get("category"), groups, r.get("client_ids"))
     if g and g["indexers"]:
         return [k for k in g["indexers"] if k in active], "group"
     return list(active), "xs"
