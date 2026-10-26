@@ -491,10 +491,10 @@ def torrent_client_entries() -> list:
     return _js_strings(text, m.end()) if m else []
 
 
-def _torrent_clients_span(text: str):
-    """(position du « [ », position du « ] ») du tableau torrentClients de config.js, ou None."""
+def _array_span(text: str, key: str):
+    """(position du « [ », position du « ] ») du tableau `key` de config.js (hors commentaires), ou None."""
     blank = _blank_comments(text)
-    m = re.search(r"\btorrentClients\s*:\s*\[", blank)
+    m = re.search(rf"\b{re.escape(key)}\s*:\s*\[", blank)
     if not m:
         return None
     i, n, depth = m.end(), len(blank), 0
@@ -516,23 +516,131 @@ def _torrent_clients_span(text: str):
     return None
 
 
-def _set_torrent_clients(entries: list) -> dict:
-    """Réécrit le tableau torrentClients de config.js, une entrée par ligne (sauvegarde préalable).
-    Les lignes commentées à l'intérieur du tableau sont conservées à la fin."""
-    if config.XS_VERSION == "7":
-        raise ValueError("cross-seed v7 : les clients torrent se gèrent dans son interface native")
+def _note(rest: str) -> str:
+    """Commentaire de fin de ligne (« // texte ») après la dernière chaîne, sans les « // »."""
+    m = re.search(r"//\s*(.*\S)", rest)
+    return m.group(1) if m else ""
+
+
+def array_items(key: str) -> list:
+    """Éléments du tableau `key` de config.js, ligne par ligne et dans l'ordre :
+    {"value", "state": "active" | "suspended", "note"} ; une ligne commentée qui contient une chaîne
+    est un élément suspendu ; une ligne de commentaire sans chaîne : {"comment": texte}."""
     text = _config_text()
-    span = _torrent_clients_span(text)
+    span = _array_span(text, key)
     if span is None:
-        raise ValueError("Tableau torrentClients introuvable dans config.js")
+        return []
+    out = []
+    for raw in text[span[0] + 1:span[1]].split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("//"):
+            body = line[2:].strip()
+            vals = _js_strings(body, 0) if _STR_RE.match(body) else []
+            if vals:
+                last = list(_STR_RE.finditer(body))[len(vals) - 1]
+                out += [{"value": v, "state": "suspended", "note": ""} for v in vals[:-1]]
+                out.append({"value": vals[-1], "state": "suspended", "note": _note(body[last.end():])})
+            else:
+                out.append({"comment": line})
+            continue
+        code = _blank_comments(line)
+        matches = list(_STR_RE.finditer(code))
+        for k, mt in enumerate(matches):
+            v = _js_strings(line[mt.start():mt.end()] + "]", 0)
+            out.append({"value": v[0] if v else "", "state": "active",
+                        "note": _note(line[matches[-1].end():]) if k == len(matches) - 1 else ""})
+    return out
+
+
+def _set_array(key: str, items: list) -> dict:
+    """Réécrit le tableau `key` de config.js, un élément par ligne, suspendus commentés (sauvegarde
+    préalable). items : comme array_items()."""
+    if config.XS_VERSION == "7":
+        raise ValueError(f"cross-seed v7 : {key} se règle dans son interface native")
+    text = _config_text()
+    span = _array_span(text, key)
+    if span is None:
+        raise ValueError(f"Tableau {key} introuvable dans config.js")
     start, end = span
     line_start = text.rfind("\n", 0, start) + 1
     base = _indent(text[line_start:start])
-    inner = text[start + 1:end]
-    comments = [ln.strip() for ln in inner.split("\n") if ln.strip().startswith("//")]
-    body = [f"{base}  {json.dumps(e, ensure_ascii=False)}," for e in entries] + [f"{base}  {c}" for c in comments]
-    new = text[:start] + "[\n" + "\n".join(body) + "\n" + base + text[end:]
+    lines = []
+    for it in items:
+        if "comment" in it:
+            lines.append(f"{base}  {it['comment']}")
+            continue
+        entry = json.dumps(it["value"], ensure_ascii=False) + ","
+        if it["state"] == "suspended":
+            entry = "// " + entry
+        if it.get("note"):
+            entry += f"   // {it['note']}"
+        lines.append(f"{base}  {entry}")
+    new = text[:start] + "[\n" + "\n".join(lines) + "\n" + base + text[end:]
     return _write_config(text, new)
+
+
+def _set_torrent_clients(entries: list) -> dict:
+    """Réécrit torrentClients avec ces entrées actives ; lignes commentées conservées à la fin."""
+    keep = [it for it in array_items("torrentClients") if "comment" in it or it["state"] == "suspended"]
+    notes = {it["value"]: it["note"] for it in array_items("torrentClients") if it.get("state") == "active"}
+    return _set_array("torrentClients", [{"value": e, "state": "active", "note": notes.get(e, "")}
+                                         for e in entries] + keep)
+
+
+# --- dataDirs (recherche par les données) -----------------------------------------
+
+def data_dirs() -> list:
+    """Dossiers dataDirs : config.js en v6 (actifs et suspendus), réglages en base en v7 (actifs)."""
+    if config.XS_VERSION == "7":
+        con = _connect()
+        if not con:
+            return []
+        try:
+            row = con.execute("SELECT settings_json FROM settings LIMIT 1").fetchone()
+            value = (json.loads(row[0]) if row and row[0] else {}).get("dataDirs")
+        except (sqlite3.Error, ValueError):
+            value = None
+        finally:
+            con.close()
+        return [{"value": str(v), "state": "active", "note": ""} for v in value or [] if isinstance(v, str)]
+    return [it for it in array_items("dataDirs") if "comment" not in it]
+
+
+def _clean_dir(path: str) -> str:
+    path = str(path or "").strip()
+    if not path.startswith("/") or "\n" in path or len(path) > 500:
+        raise ValueError("Chemin absolu attendu, tel que vu par cross-seed (ex. /data/films)")
+    return path.rstrip("/") or "/"
+
+
+def update_data_dir(path: str, action: str) -> dict:
+    """action : add, remove, suspend ou resume. Retour : {"changed", "backup"}."""
+    path = _clean_dir(path)
+    items = array_items("dataDirs")
+    if _array_span(_config_text(), "dataDirs") is None:
+        raise ValueError("dataDirs introuvable dans config.js : ajoute d'abord « dataDirs: [], » à la main")
+    found = next((it for it in items if it.get("value") == path), None)
+    if action == "add":
+        if found and found["state"] == "active":
+            return {"changed": False, "backup": None}
+        if found:
+            found["state"] = "active"
+        else:
+            items.append({"value": path, "state": "active", "note": ""})
+    elif not found:
+        raise ValueError("Dossier absent de dataDirs")
+    elif action == "remove":
+        items.remove(found)
+    elif action in ("suspend", "resume"):
+        state = "suspended" if action == "suspend" else "active"
+        if found["state"] == state:
+            return {"changed": False, "backup": None}
+        found["state"] = state
+    else:
+        raise ValueError("Action inconnue")
+    return _set_array("dataDirs", items)
 
 
 def add_torrent_client(entry: str) -> dict:

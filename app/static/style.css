@@ -569,3 +569,13 @@ table.queue td.c-act .btns { justify-content: flex-end; flex-wrap: nowrap; }
 .examined .muted { margin-left: 6px; font-size: 12px; }
 /* erreurs d'une injection qui se règle toute seule : attendues, montrées en gris dans le détail */
 .card pre.p-log { color: var(--muted); }
+
+/* dataDirs */
+.dd-list { display: grid; grid-template-columns: max-content max-content minmax(0, 320px) max-content; gap: 6px 14px; align-items: center; margin: 8px 0; }
+.dd-list code { font-family: var(--mono); font-size: 12.5px; }
+.dd-list .off code { color: var(--muted); text-decoration: line-through; }
+.dd-list .btns { display: flex; gap: 6px; }
+.dd-add { display: flex; gap: 8px; max-width: 520px; }
+.dd-add input { flex: 1; }
+#dd-restart { margin-top: 10px; }
+@media (max-width: 700px) { .dd-list { grid-template-columns: 1fr; } }

@@ -291,6 +291,16 @@
       </div>
       <button class="primary" id="clients-restart" hidden>Redémarrer cross-seed pour appliquer</button>
 
+      <h2 id="set-datadirs">Recherche par les données (dataDirs)</h2>
+      <p class="muted" id="dd-intro">Dossiers où cross-seed cherche des fichiers sans torrent (dataDirs de config.js). Chemins tels que vus par le conteneur cross-seed. Suspendre commente la ligne. cross-seed les relit au redémarrage.</p>
+      <p class="muted" id="dd-target"></p>
+      <div id="dd-list" class="dd-list"></div>
+      <div class="dd-add" id="dd-add" hidden>
+        <input type="text" id="dd-path" placeholder="/media/downloads/films" autocomplete="off">
+        <button class="small" id="dd-add-btn">Ajouter</button>
+      </div>
+      <button class="primary" id="dd-restart" hidden>Redémarrer cross-seed pour appliquer</button>
+
       <h2>Noms des trackers</h2>
       <p class="muted">Nom affiché pour chaque tracker détecté dans les clients torrent. Laisse vide pour garder le nom automatique : celui de l'indexer Prowlarr ou Jackett du même site s'il existe, sinon le domaine.</p>
       <div id="aliases" class="aliases"></div>

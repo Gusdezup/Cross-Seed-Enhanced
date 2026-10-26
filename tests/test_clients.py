@@ -315,3 +315,38 @@ def test_add_endpoint_tests_first(tmp_path, monkeypatch):
     # identifiant de retrait : l'adresse telle qu'écrite chez cross-seed, même si XSE la réécrit
     conf = tc.configured()
     assert [c["raw_id"] for c in conf["clients"]] == ["qbittorrent:h:8081", "qbittorrent:h:8082"]
+
+
+# --- dataDirs ----------------------------------------------------------------------
+
+def test_data_dirs_edit_keeps_notes_and_comments(tmp_path):
+    write_config(tmp_path, """    torrentClients: [
+      "qbittorrent:readonly:http://h:8082",
+      "qbittorrent:http://h:8081",
+    ],
+    /**
+     * dataDirs: ["/path/here", "/other/path/here"],
+     */
+        dataDirs: [
+        "/media/downloads/films",
+        // "/media/downloads/musique",   // musique : uniquement via le qBit 8082
+        "/media/downloads/documentaires"],
+    maxDataDepth: 2,""")
+    assert [(i["value"], i["state"]) for i in xsdb.data_dirs()] == [
+        ("/media/downloads/films", "active"), ("/media/downloads/musique", "suspended"),
+        ("/media/downloads/documentaires", "active")]
+    assert xsdb.update_data_dir("/media/downloads/films", "suspend")["changed"]
+    assert xsdb.update_data_dir("/media/downloads/films", "suspend")["changed"] is False
+    xsdb.update_data_dir("/media/series/", "add")
+    xsdb.update_data_dir("/media/downloads/documentaires", "remove")
+    text = (tmp_path / "config.js").read_text()
+    assert '// "/media/downloads/musique",   // musique : uniquement via le qBit 8082' in text
+    assert 'dataDirs: ["/path/here", "/other/path/here"]' in text   # exemple du modèle intact
+    assert "maxDataDepth: 2" in text
+    assert [(i["value"], i["state"]) for i in xsdb.data_dirs()] == [
+        ("/media/downloads/films", "suspended"), ("/media/downloads/musique", "suspended"), ("/media/series", "active")]
+    assert len(xsdb.torrent_client_entries()) == 2   # autre tableau inchangé
+    with pytest.raises(ValueError, match="absolu"):
+        xsdb.update_data_dir("media/x", "add")
+    # données injectées dans le premier client hors lecture seule
+    assert tc.inject_target() == "qBittorrent :8081"

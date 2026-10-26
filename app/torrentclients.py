@@ -510,6 +510,22 @@ async def status() -> dict:
     } for c, v in zip(specs, versions)], "editable": editable()}
 
 
+def inject_target() -> str:
+    """Nom du client où cross-seed injecte les correspondances trouvées par les données (dataDirs) :
+    le premier client de torrentClients qui n'est pas en lecture seule ("" si aucun)."""
+    for entry in xsdb.torrent_client_entries():
+        try:
+            c = config.parse_client(entry)
+        except ValueError:
+            continue
+        if c["readonly"]:
+            continue
+        raw = config.client_id(c)
+        known = next((k for k in configured()["clients"] if k.get("raw_id") == raw or k["id"] == raw), None)
+        return known["name"] if known else config.client_url(adapt(c))
+    return ""
+
+
 def editable() -> bool:
     """Clients modifiables depuis l'interface : torrentClients de config.js (v6), écriture permise."""
     return config.XS_VERSION == "6" and (not config.READONLY or config.ALLOW_CONFIG_WRITE)

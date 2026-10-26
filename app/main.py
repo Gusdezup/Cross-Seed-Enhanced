@@ -709,6 +709,23 @@ async def client_remove(body: dict):
     return res
 
 
+# --- dataDirs (recherche par les données) ------------------------------------------
+
+@app.get("/api/datadirs")
+async def datadirs():
+    return {"items": await asyncio.to_thread(xsdb.data_dirs), "editable": torrentclients.editable(),
+            "version": config.XS_VERSION, "inject_client": await asyncio.to_thread(torrentclients.inject_target),
+            "clients": len(torrentclients.configured()["clients"])}
+
+
+@app.post("/api/datadirs")
+async def datadirs_update(body: dict):
+    try:
+        return await asyncio.to_thread(xsdb.update_data_dir, str(body.get("path", "")), str(body.get("action", "")))
+    except (ValueError, OSError) as e:
+        raise _config_error(e) from e
+
+
 @app.post("/api/xs-restart")
 async def xs_restart():
     try:

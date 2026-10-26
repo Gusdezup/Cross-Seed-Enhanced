@@ -1604,7 +1604,7 @@ function renderClients() {
     (state.clientsEditable
       ? "Ajouter ou retirer un client ici modifie torrentClients dans config.js ; cross-seed le prend en compte après redémarrage. "
       : "Pour ajouter un client, déclare-le dans torrentClients de cross-seed (il doit le connaître pour y chercher et injecter), puis redémarre cross-seed. ") +
-    (state.clientsOrigin.startsWith(".env (TORRENT") ? "Attention : TORRENT_CLIENT_N du .env impose la liste lue par XSE, config.js ne la change pas. " : "") +
+    ((state.clientsOrigin || "").startsWith(".env (TORRENT") ? "Attention : TORRENT_CLIENT_N du .env impose la liste lue par XSE, config.js ne la change pas. " : "") +
     "Le nom sert aux badges et au filtre « Dans le client » ; laisse vide pour le nom automatique." +
     (ign.length ? ` Entrées ignorées : ${ign.join(" ; ")}` : "");
   $("#clients-list").innerHTML = cl.length ? cl.map((c) => `
@@ -1676,6 +1676,42 @@ $("#clients-list").addEventListener("click", async (e) => {
 });
 $("#clients-restart").addEventListener("click", async (e) => { if (await restartXs(e.target)) e.target.hidden = true; });
 
+// ---------- dataDirs ----------
+async function renderDataDirs() {
+  let d;
+  try { d = await api("/api/datadirs"); } catch (err) { $("#dd-list").innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  const edit = d.editable && d.version === "6";
+  if (d.version === "7") $("#dd-intro").textContent = "Dossiers où cross-seed cherche des fichiers sans torrent (dataDirs). En v7, ils se règlent dans l'interface native de cross-seed.";
+  // cross-seed injecte tout ce qu'il trouve par les données dans un seul client : on le dit
+  $("#dd-target").textContent = d.inject_client && d.items.some((i) => i.state === "active")
+    ? `Ce qui est trouvé dans ces dossiers est injecté dans ${d.inject_client} (premier client de torrentClients hors lecture seule ; cross-seed ne permet pas d'en choisir un autre).` +
+      (d.clients > 1 ? " Retire ou suspends les dossiers dont les torrents doivent aller dans un autre client." : "")
+    : "";
+  $("#dd-list").innerHTML = d.items.length ? d.items.map((i) => `<span class="${i.state === "active" ? "" : "off"}"><code>${esc(i.value)}</code></span>
+    <span>${i.state === "active" ? `<span class="tag">actif</span>` : `<span class="tag">suspendu</span>`}</span>
+    <span class="muted">${esc(i.note || "")}</span>
+    <span class="btns">${edit ? `<button class="small ghost" data-dd="${i.state === "active" ? "suspend" : "resume"}" data-path="${esc(i.value)}">${i.state === "active" ? "Suspendre" : "Réactiver"}</button>
+      <button class="small ghost" data-dd="remove" data-path="${esc(i.value)}">Retirer</button>` : ""}</span>`).join("")
+    : `<p class="muted">Aucun dossier : cross-seed ne cherche qu'à partir des torrents des clients.</p>`;
+  $("#dd-add").hidden = !edit;
+}
+async function ddUpdate(path, action) {
+  const r = await api("/api/datadirs", { method: "POST", body: { path, action } });
+  if (r.changed) { toast(`config.js modifié (sauvegarde : ${r.backup})`); $("#dd-restart").hidden = !state.restartAvailable; }
+  renderDataDirs();
+}
+$("#dd-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-dd]");
+  if (!b) return;
+  if (b.dataset.dd === "remove" && !confirm(`Retirer ${b.dataset.path} de dataDirs ?`)) return;
+  b.disabled = true;
+  try { await ddUpdate(b.dataset.path, b.dataset.dd); } catch (err) { toast(err.message, true); b.disabled = false; }
+});
+$("#dd-add-btn").addEventListener("click", async () => {
+  try { await ddUpdate($("#dd-path").value.trim(), "add"); $("#dd-path").value = ""; } catch (err) { toast(err.message, true); }
+});
+$("#dd-restart").addEventListener("click", async (e) => { if (await restartXs(e.target)) e.target.hidden = true; });
+
 $("#clients-list").addEventListener("input", () => { state.settingsDirty = true; });
 
 function renderAliases() {
@@ -1694,6 +1730,7 @@ async function renderSettings() {
   renderScan();
   renderAliases();
   renderClients();
+  renderDataDirs();
   renderSources();
   renderXsForm();
   loadIndexers();
