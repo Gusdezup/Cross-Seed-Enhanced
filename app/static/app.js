@@ -153,7 +153,10 @@ async function loadHealth() {
     state.clientsOrigin = s.clients_origin || "";
     state.clientsIgnored = s.clients_ignored || [];
     state.clientsEditable = !!s.clients_editable;
-    if (state.tab === "settings") { renderClients(); if (state.settings) renderGroups(); }
+    // groupes redessinés seulement si une version change (pas toutes les 30 s : saisie en cours)
+    const sig = cl.map((c) => `${c.id}=${c.version}`).join("|");
+    if (state.tab === "settings") { renderClients(); if (state.settings && sig !== state.clientsSig) renderGroups(); }
+    state.clientsSig = sig;
     if (!state.xsRestarting) {   // pendant un redémarrage, la pastille affiche « redémarre… »
       x.className = `pill ${s.xs.ok ? "ok" : "ko"}`;
       x.lastChild.textContent = s.xs.ok ? `cross-seed v${state.xsVersion} en ligne` : `cross-seed v${state.xsVersion} injoignable`;
